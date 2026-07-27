@@ -1,0 +1,56 @@
+@import url('https://api.fontshare.com/v2/css?f[]=clash-display@400,600,700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap');
+
+@import "tailwindcss";
+
+:root {
+  --background: #090A0F;
+  --foreground: #F8FAFC;
+  --surface: #161922;
+  --surface-hover: #1E2330;
+  --accent-gold: #FACC15;
+  --accent-cyan: #22D3EE;
+  --nebula-gray: #94A3B8;
+  --error: #EF4444;
+  --success: #10B981;
+}
+
+@theme {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-surface: var(--surface);
+  --color-surface-hover: var(--surface-hover);
+  --color-accent-gold: var(--accent-gold);
+  --color-accent-cyan: var(--accent-cyan);
+  --color-nebula-gray: var(--nebula-gray);
+  --color-error: var(--error);
+  --color-success: var(--success);
+
+  --font-sans: 'Inter', sans-serif;
+  --font-display: 'Clash Display', sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+}
+
+body {
+  background-color: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  min-height: 100vh;
+  margin: 0;
+}
+
+/* Custom scrollbar for premium theme feel */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: var(--background);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--surface);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--surface-hover);
+}
