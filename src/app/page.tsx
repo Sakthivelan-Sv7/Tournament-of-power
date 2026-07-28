@@ -11,51 +11,60 @@ import { PointsTable } from '../components/PointsTable';
 import { MatchCenter } from '../components/MatchCenter';
 import { AdminManagement } from '../components/AdminManagement';
 import { generateRoundRobinFixtures, generateKnockoutRound1 } from '../utils/formatEngine';
-import { Trophy, Calendar, Users, Cpu, ShieldAlert, Award, RefreshCw, Zap, Shield } from 'lucide-react';
+import {
+  Trophy, Calendar, Users, ShieldAlert, Award, RefreshCw,
+  Zap, Shield, Plus, ChevronDown, Sparkles
+} from 'lucide-react';
 import { Avatar } from '../components/Avatar';
 
 export default function HomePage() {
+  const [tournaments, setTournaments] = useState<Tournament[]>([]);
   const [activeTournament, setActiveTournament] = useState<Tournament | null>(null);
   const [sportProfiles, setSportProfiles] = useState<SportProfile[]>([]);
   const [teams, setTeams] = useState<Team[]>([]);
   const [activeTab, setActiveTab] = useState<'standings' | 'fixtures' | 'registry' | 'admins'>('registry');
   const [selectedMatchId, setSelectedMatchId] = useState<string | null>(null);
-  
-  // Triggers component updates
+  const [showWizard, setShowWizard] = useState(false);
+  const [showTournamentDropdown, setShowTournamentDropdown] = useState(false);
+
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [loading, setLoading] = useState(true);
 
-  // Auth State
   const [session, setSession] = useState<any>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
 
-  // Champion for completed state
   const [champion, setChampion] = useState<StandingsRow | null>(null);
 
   const triggerRefresh = useCallback(() => {
     setRefreshTrigger(prev => prev + 1);
   }, []);
 
-  const loadData = useCallback(async () => {
+  const loadData = useCallback(async (keepTournamentId?: string) => {
     setLoading(true);
     try {
       const profiles = await db.getSportProfiles();
       setSportProfiles(profiles);
 
-      const tournaments = await db.getTournaments();
-      if (tournaments.length > 0) {
-        const active = tournaments[0]; // grab the latest tournament as the active one for this single-tenant session
-        setActiveTournament(active);
-        
-        const registeredTeams = await db.getTeams(active.id);
+      const allTournaments = await db.getTournaments();
+      setTournaments(allTournaments);
+
+      if (allTournaments.length > 0) {
+        // Prefer the currently selected tournament, otherwise take the latest
+        const target = keepTournamentId
+          ? allTournaments.find(t => t.id === keepTournamentId) || allTournaments[0]
+          : allTournaments[0];
+
+        setActiveTournament(target);
+
+        // Only get accepted teams for the main display/fixtures/standings
+        const registeredTeams = await db.getTeams(target.id, 'accepted');
         setTeams(registeredTeams);
 
-        // If active, default to standings or fixtures instead of registry
-        if (active.status === 'active') {
+        if (target.status === 'active') {
           setActiveTab('fixtures');
-        } else if (active.status === 'completed') {
+        } else if (target.status === 'completed') {
           setActiveTab('standings');
-          const standings = await db.getStandings(active.id);
+          const standings = await db.getStandings(target.id);
           if (standings.length > 0) {
             setChampion(standings[0]);
           }
@@ -97,22 +106,39 @@ export default function HomePage() {
 
   useEffect(() => {
     if (session) {
-      loadData();
+      loadData(activeTournament?.id);
     }
   }, [loadData, refreshTrigger, session]);
 
   const handleTournamentCreated = (tournament: Tournament) => {
+    setShowWizard(false);
     setActiveTournament(tournament);
     setTeams([]);
     setActiveTab('registry');
+    setChampion(null);
     triggerRefresh();
   };
 
-  // Reload teams from storage whenever Registration registers a new team/player
+  const handleSelectTournament = async (t: Tournament) => {
+    setShowTournamentDropdown(false);
+    setActiveTournament(t);
+    setSelectedMatchId(null);
+    setChampion(null);
+    setActiveTab(t.status === 'active' ? 'fixtures' : t.status === 'completed' ? 'standings' : 'registry');
+
+    const accepted = await db.getTeams(t.id, 'accepted');
+    setTeams(accepted);
+
+    if (t.status === 'completed') {
+      const standings = await db.getStandings(t.id);
+      if (standings.length > 0) setChampion(standings[0]);
+    }
+  };
+
   const reloadTeams = async () => {
     if (!activeTournament) return;
     try {
-      const freshTeams = await db.getTeams(activeTournament.id);
+      const freshTeams = await db.getTeams(activeTournament.id, 'accepted');
       setTeams(freshTeams);
     } catch (err) {
       console.error('Error reloading teams:', err);
@@ -127,13 +153,11 @@ export default function HomePage() {
       if (activeTournament.format === 'league') {
         generatedMatches = generateRoundRobinFixtures(activeTournament.id, teams, false);
       } else if (activeTournament.format === 'knockout') {
-        // Find closest power of 2 size for knockout size: 2, 4, 8, 16
         const teamCount = teams.length;
         let size: 2 | 4 | 8 | 16 = 2;
         if (teamCount > 8) size = 16;
         else if (teamCount > 4) size = 8;
         else if (teamCount > 2) size = 4;
-        
         generatedMatches = generateKnockoutRound1(activeTournament.id, teams, size);
       }
 
@@ -148,11 +172,12 @@ export default function HomePage() {
     }
   };
 
+  // ADMIN ONLY — Reset system
   const handleResetTournament = async () => {
-    if (!confirm('DANGER: This will delete ALL teams, players, and match records. Return to the creation wizard?')) return;
+    if (profile?.role !== 'admin') return;
+    if (!confirm('DANGER: This will delete ALL teams, players, and match records for this tournament. Continue?')) return;
     try {
       if (activeTournament) {
-        // Clean local storage or databases
         if (db.isSupabaseConfigured()) {
           const { supabase } = await import('../utils/supabaseClient');
           await supabase.from('tournaments').delete().eq('id', activeTournament.id);
@@ -184,14 +209,15 @@ export default function HomePage() {
     );
   }
 
-  // Check if Supabase variables are set
   const supabaseConnected = db.isSupabaseConfigured();
+  const isAdmin = profile?.role === 'admin';
 
   return (
     <div className="flex-1 flex flex-col">
       {/* Universal Sticky Topbar */}
-      <header className="border-b border-white/5 bg-surface/50 backdrop-blur-md sticky top-0 z-50 px-6 py-4 flex flex-col sm:flex-row items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
+      <header className="border-b border-white/5 bg-surface/50 backdrop-blur-md sticky top-0 z-50 px-4 sm:px-6 py-3 flex flex-col sm:flex-row items-center justify-between gap-3">
+        {/* Left: Logo + Title */}
+        <div className="flex items-center gap-3 shrink-0">
           <div className="p-2 bg-gradient-to-tr from-accent-gold to-yellow-400 text-background rounded-lg shadow-md">
             <Trophy className="w-5 h-5 font-bold" />
           </div>
@@ -203,12 +229,46 @@ export default function HomePage() {
           </div>
         </div>
 
-        {/* User Info & Controls */}
-        <div className="flex items-center gap-4">
+        {/* Centre: Tournament Selector (only when signed in and tournaments exist) */}
+        {session && tournaments.length > 0 && (
+          <div className="relative flex-1 flex justify-center max-w-xs">
+            <button
+              onClick={() => setShowTournamentDropdown(v => !v)}
+              className="flex items-center gap-2 px-4 py-2 bg-surface border border-white/10 hover:border-white/20 rounded-xl text-sm font-bold text-foreground transition-all w-full justify-between"
+            >
+              <div className="flex items-center gap-2 truncate">
+                <Trophy className="w-4 h-4 text-accent-gold shrink-0" />
+                <span className="truncate">{activeTournament?.name || 'Select Tournament'}</span>
+              </div>
+              <ChevronDown className={`w-4 h-4 text-nebula-gray shrink-0 transition-transform ${showTournamentDropdown ? 'rotate-180' : ''}`} />
+            </button>
+            {showTournamentDropdown && (
+              <div className="absolute top-full mt-2 w-full bg-surface border border-white/10 rounded-2xl shadow-2xl overflow-hidden z-50">
+                {tournaments.map(t => (
+                  <button
+                    key={t.id}
+                    onClick={() => handleSelectTournament(t)}
+                    className={`w-full flex items-center justify-between px-4 py-3 text-sm font-semibold text-left hover:bg-white/5 transition-colors ${activeTournament?.id === t.id ? 'text-accent-gold bg-accent-gold/5' : 'text-foreground'}`}
+                  >
+                    <span className="truncate">{t.name}</span>
+                    <span className={`text-[9px] font-mono uppercase px-1.5 py-0.5 rounded ml-2 shrink-0 ${
+                      t.status === 'active' ? 'bg-success/20 text-success' :
+                      t.status === 'completed' ? 'bg-white/10 text-nebula-gray' :
+                      'bg-accent-gold/10 text-accent-gold'
+                    }`}>{t.status}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Right: User Info & Controls */}
+        <div className="flex items-center gap-3 shrink-0">
           {session && (
-            <div className="flex items-center gap-3 mr-4 border-r border-white/10 pr-4">
-              <div className="text-right">
-                <div className="text-sm font-bold text-slate-200">{session.user.email}</div>
+            <div className="flex items-center gap-3 mr-2 border-r border-white/10 pr-3">
+              <div className="text-right hidden sm:block">
+                <div className="text-xs font-bold text-slate-200">{session.user.email}</div>
                 <div className="text-[10px] uppercase font-bold text-amber-500">{profile?.role || 'User'}</div>
               </div>
               <button
@@ -220,22 +280,33 @@ export default function HomePage() {
             </div>
           )}
 
-          {/* Database indicator & controllers */}
-          <div className="flex items-center gap-4">
-            <div className="flex items-center gap-2">
-              <span className={`w-2.5 h-2.5 rounded-full ${supabaseConnected ? 'bg-success animate-pulse' : 'bg-amber-500'}`} />
-              <span className="text-[10px] font-mono text-nebula-gray uppercase">
-                {supabaseConnected ? 'Supabase Connected' : 'Local Storage Sandbox'}
+          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5">
+              <span className={`w-2 h-2 rounded-full ${supabaseConnected ? 'bg-success animate-pulse' : 'bg-amber-500'}`} />
+              <span className="text-[9px] font-mono text-nebula-gray uppercase hidden sm:block">
+                {supabaseConnected ? 'Supabase' : 'Local'}
               </span>
             </div>
 
-            {activeTournament && (
+            {/* Create Tournament — Admins only */}
+            {isAdmin && session && (
+              <button
+                onClick={() => setShowWizard(v => !v)}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-accent-gold/10 hover:bg-accent-gold/20 text-accent-gold border border-accent-gold/20 hover:border-accent-gold/50 rounded-xl text-xs font-bold transition-all"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">New Tournament</span>
+              </button>
+            )}
+
+            {/* Reset System — ADMIN ONLY */}
+            {isAdmin && activeTournament && (
               <button
                 onClick={handleResetTournament}
-                className="flex items-center gap-1.5 px-3.5 py-2 border border-error/20 bg-error/5 hover:bg-error/10 text-error hover:border-error rounded-xl text-xs font-bold transition-all"
+                className="flex items-center gap-1.5 px-3 py-1.5 border border-error/20 bg-error/5 hover:bg-error/10 text-error hover:border-error rounded-xl text-xs font-bold transition-all"
               >
                 <RefreshCw className="w-3.5 h-3.5" />
-                Reset System
+                <span className="hidden sm:inline">Reset</span>
               </button>
             )}
           </div>
@@ -245,12 +316,36 @@ export default function HomePage() {
       {/* Main Body content */}
       {!session ? (
         <Auth onAuthSuccess={() => loadData()} />
+      ) : showWizard ? (
+        <div className="flex-1 flex items-center justify-center p-6 md:p-8">
+          <div className="w-full max-w-4xl">
+            <div className="flex items-center justify-between mb-6">
+              <div className="flex items-center gap-3">
+                <Sparkles className="w-5 h-5 text-accent-gold" />
+                <h2 className="text-lg font-display font-bold text-foreground">Create New Tournament</h2>
+              </div>
+              <button
+                onClick={() => setShowWizard(false)}
+                className="text-xs text-nebula-gray hover:text-foreground px-3 py-1.5 rounded-lg border border-white/10 hover:border-white/20 transition-all"
+              >
+                Cancel
+              </button>
+            </div>
+            <TournamentWizard onComplete={handleTournamentCreated} sportProfiles={sportProfiles} />
+          </div>
+        </div>
       ) : (
-        <main className="flex-1 max-w-7xl w-full mx-auto p-6 md:p-8 flex flex-col justify-start">
+        <main className="flex-1 max-w-7xl w-full mx-auto p-4 md:p-8 flex flex-col justify-start">
           {!activeTournament ? (
             <div className="flex-1 flex items-center justify-center py-12">
-              {profile?.role === 'admin' ? (
-                <TournamentWizard onComplete={handleTournamentCreated} sportProfiles={sportProfiles} />
+              {isAdmin ? (
+                <div className="text-center space-y-4">
+                  <div className="w-20 h-20 mx-auto rounded-3xl bg-accent-gold/10 border border-accent-gold/20 flex items-center justify-center">
+                    <Trophy className="w-10 h-10 text-accent-gold" />
+                  </div>
+                  <h3 className="text-xl font-bold text-slate-300">No Tournaments Yet</h3>
+                  <p className="text-slate-500 text-sm">Click "New Tournament" in the top bar to get started.</p>
+                </div>
               ) : (
                 <div className="text-center p-8 bg-surface rounded-3xl border border-white/5">
                   <h3 className="text-xl font-bold text-slate-300 mb-2">No Active Tournament</h3>
@@ -259,128 +354,133 @@ export default function HomePage() {
               )}
             </div>
           ) : (
-          <div className="space-y-8">
-            {/* Champion Celebration Banner */}
-            {activeTournament.status === 'completed' && champion && (
-              <div className="bg-gradient-to-r from-accent-gold/10 via-yellow-500/5 to-transparent border-2 border-accent-gold/30 rounded-3xl p-8 flex flex-col md:flex-row items-center justify-between gap-6 shadow-[0_0_30px_rgba(250,204,21,0.05)]">
-                <div className="flex items-center gap-6">
-                  <div className="w-16 h-16 bg-accent-gold text-background rounded-2xl flex items-center justify-center text-4xl shadow-lg border border-accent-gold">
-                    🏆
+            <div className="space-y-8">
+              {/* Champion Celebration Banner */}
+              {activeTournament.status === 'completed' && champion && (
+                <div className="bg-gradient-to-r from-accent-gold/10 via-yellow-500/5 to-transparent border-2 border-accent-gold/30 rounded-3xl p-8 flex flex-col md:flex-row items-center justify-between gap-6 shadow-[0_0_30px_rgba(250,204,21,0.05)]">
+                  <div className="flex items-center gap-6">
+                    <div className="w-16 h-16 bg-accent-gold text-background rounded-2xl flex items-center justify-center text-4xl shadow-lg border border-accent-gold">
+                      🏆
+                    </div>
+                    <div>
+                      <span className="text-xs uppercase font-extrabold tracking-widest text-accent-gold font-mono">
+                        Tournament Complete
+                      </span>
+                      <h2 className="text-2xl font-display font-extrabold text-foreground mt-1">
+                        {champion.team_name} wins the Championship!
+                      </h2>
+                      <p className="text-xs text-nebula-gray mt-0.5">
+                        {champion.pts} Points · Goal Diff {champion.gd > 0 ? `+${champion.gd}` : champion.gd}
+                      </p>
+                    </div>
                   </div>
-                  <div>
-                    <span className="text-xs uppercase font-extrabold tracking-widest text-accent-gold font-mono">
-                      Tournament Complete
-                    </span>
-                    <h2 className="text-2xl font-display font-extrabold text-foreground mt-1">
-                      {champion.team_name} wins the Championship!
-                    </h2>
-                    <p className="text-xs text-nebula-gray mt-0.5">
-                      Fitted with {champion.pts} Points, Goal Diff {champion.gd > 0 ? `+${champion.gd}` : champion.gd}.
-                    </p>
+                  <div className="flex items-center gap-3">
+                    <Avatar src={champion.logo_url} name={champion.team_name} size="lg" shape="square" colorHex={champion.color_hex} />
                   </div>
                 </div>
-                <div className="flex items-center gap-3">
-                  <Avatar src={champion.logo_url} name={champion.team_name} size="lg" shape="square" colorHex={champion.color_hex} />
-                </div>
-              </div>
-            )}
+              )}
 
-            {/* Active tournament header / detail block */}
-            {selectedMatchId ? (
-              <MatchCenter
-                matchId={selectedMatchId}
-                onBack={() => {
-                  setSelectedMatchId(null);
-                  triggerRefresh();
-                }}
-                onMatchUpdated={triggerRefresh}
-                isAdmin={profile?.role === 'admin'}
-              />
-            ) : (
-              <div className="space-y-6">
-                {/* Tabs bar */}
-                <div className="flex border-b border-white/5 pb-0.5 items-center justify-between">
-                  <div className="flex gap-6">
-                    <button
-                      onClick={() => setActiveTab('registry')}
-                      className={`pb-4 text-sm font-display font-bold border-b-2 uppercase tracking-wider transition-all flex items-center gap-2 ${
-                        activeTab === 'registry' ? 'border-accent-gold text-accent-gold' : 'border-transparent text-nebula-gray hover:text-foreground'
-                      }`}
-                    >
-                      <Users className="w-4 h-4" /> Faction Registry
-                    </button>
-                    <button
-                      onClick={() => setActiveTab('fixtures')}
-                      className={`pb-4 text-sm font-display font-bold border-b-2 uppercase tracking-wider transition-all flex items-center gap-2 ${
-                        activeTab === 'fixtures' ? 'border-accent-gold text-accent-gold' : 'border-transparent text-nebula-gray hover:text-foreground'
-                      }`}
-                    >
-                      <Calendar className="w-4 h-4" /> Brackets & Fixtures
-                    </button>
-                    <button
-                      onClick={() => setActiveTab('standings')}
-                      className={`pb-4 text-sm font-display font-bold border-b-2 uppercase tracking-wider transition-all flex items-center gap-2 ${
-                        activeTab === 'standings' ? 'border-accent-gold text-accent-gold' : 'border-transparent text-nebula-gray hover:text-foreground'
-                      }`}
-                    >
-                      <Trophy className="w-4 h-4" /> Leaderboard
-                    </button>
-                    {profile?.role === 'admin' && (
+              {/* Active tournament tab area */}
+              {selectedMatchId ? (
+                <MatchCenter
+                  matchId={selectedMatchId}
+                  onBack={() => {
+                    setSelectedMatchId(null);
+                    triggerRefresh();
+                  }}
+                  onMatchUpdated={triggerRefresh}
+                  isAdmin={isAdmin}
+                />
+              ) : (
+                <div className="space-y-6">
+                  {/* Tabs bar */}
+                  <div className="flex border-b border-white/5 pb-0.5 items-center justify-between gap-2 overflow-x-auto">
+                    <div className="flex gap-4 sm:gap-6 shrink-0">
                       <button
-                        onClick={() => setActiveTab('admins')}
-                        className={`pb-4 text-sm font-display font-bold border-b-2 uppercase tracking-wider transition-all flex items-center gap-2 ${
-                          activeTab === 'admins' ? 'border-accent-gold text-accent-gold' : 'border-transparent text-nebula-gray hover:text-foreground'
+                        onClick={() => setActiveTab('registry')}
+                        className={`pb-4 text-xs sm:text-sm font-display font-bold border-b-2 uppercase tracking-wider transition-all flex items-center gap-2 whitespace-nowrap ${
+                          activeTab === 'registry' ? 'border-accent-gold text-accent-gold' : 'border-transparent text-nebula-gray hover:text-foreground'
                         }`}
                       >
-                        <Shield className="w-4 h-4" /> Admins
+                        <Users className="w-4 h-4" /> Registry
                       </button>
-                    )}
+                      <button
+                        onClick={() => setActiveTab('fixtures')}
+                        className={`pb-4 text-xs sm:text-sm font-display font-bold border-b-2 uppercase tracking-wider transition-all flex items-center gap-2 whitespace-nowrap ${
+                          activeTab === 'fixtures' ? 'border-accent-gold text-accent-gold' : 'border-transparent text-nebula-gray hover:text-foreground'
+                        }`}
+                      >
+                        <Calendar className="w-4 h-4" /> Fixtures
+                      </button>
+                      <button
+                        onClick={() => setActiveTab('standings')}
+                        className={`pb-4 text-xs sm:text-sm font-display font-bold border-b-2 uppercase tracking-wider transition-all flex items-center gap-2 whitespace-nowrap ${
+                          activeTab === 'standings' ? 'border-accent-gold text-accent-gold' : 'border-transparent text-nebula-gray hover:text-foreground'
+                        }`}
+                      >
+                        <Trophy className="w-4 h-4" /> Leaderboard
+                      </button>
+                      {isAdmin && (
+                        <button
+                          onClick={() => setActiveTab('admins')}
+                          className={`pb-4 text-xs sm:text-sm font-display font-bold border-b-2 uppercase tracking-wider transition-all flex items-center gap-2 whitespace-nowrap ${
+                            activeTab === 'admins' ? 'border-accent-gold text-accent-gold' : 'border-transparent text-nebula-gray hover:text-foreground'
+                          }`}
+                        >
+                          <Shield className="w-4 h-4" /> Admin Panel
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="hidden md:flex items-center gap-2 px-3 py-1.5 bg-surface rounded-xl border border-white/5 shrink-0">
+                      <span className="text-[10px] uppercase font-bold text-nebula-gray">FORMAT:</span>
+                      <span className="text-[10px] uppercase font-extrabold text-foreground bg-white/5 px-2 py-0.5 rounded font-mono">
+                        {activeTournament.format}
+                      </span>
+                    </div>
                   </div>
 
-                  <div className="hidden md:flex items-center gap-2 px-3 py-1.5 bg-surface rounded-xl border border-white/5">
-                    <span className="text-[10px] uppercase font-bold text-nebula-gray">FORMAT:</span>
-                    <span className="text-[10px] uppercase font-extrabold text-foreground bg-white/5 px-2 py-0.5 rounded font-mono">
-                      {activeTournament.format}
-                    </span>
-                  </div>
+                  {/* Tab content renders */}
+                  {activeTab === 'registry' && (
+                    <Registration
+                      tournament={activeTournament}
+                      onActiveTrigger={handleActivateTournament}
+                      onTeamsUpdated={reloadTeams}
+                      isAdmin={isAdmin}
+                      session={session}
+                    />
+                  )}
+
+                  {activeTab === 'fixtures' && (
+                    <Fixtures
+                      tournament={activeTournament}
+                      teams={teams}
+                      onSelectMatch={setSelectedMatchId}
+                      refreshTrigger={refreshTrigger}
+                      isAdmin={isAdmin}
+                      onRefresh={triggerRefresh}
+                    />
+                  )}
+
+                  {activeTab === 'standings' && (
+                    <PointsTable tournament={activeTournament} refreshTrigger={refreshTrigger} />
+                  )}
+
+                  {activeTab === 'admins' && isAdmin && (
+                    <div className="py-8">
+                      <AdminManagement currentUserId={session?.user?.id} />
+                    </div>
+                  )}
                 </div>
-
-                {/* Tab content renders */}
-                {activeTab === 'registry' && (
-                  <Registration
-                    tournament={activeTournament}
-                    onActiveTrigger={handleActivateTournament}
-                    onTeamsUpdated={reloadTeams}
-                    isAdmin={profile?.role === 'admin'}
-                    session={session}
-                  />
-                )}
-
-                {activeTab === 'fixtures' && (
-                  <Fixtures
-                    tournament={activeTournament}
-                    teams={teams}
-                    onSelectMatch={setSelectedMatchId}
-                    refreshTrigger={refreshTrigger}
-                    isAdmin={profile?.role === 'admin'}
-                    onRefresh={triggerRefresh}
-                  />
-                )}
-
-                {activeTab === 'standings' && (
-                  <PointsTable tournament={activeTournament} refreshTrigger={refreshTrigger} />
-                )}
-
-                {activeTab === 'admins' && profile?.role === 'admin' && (
-                  <div className="py-8">
-                    <AdminManagement />
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        )}
+              )}
+            </div>
+          )}
         </main>
+      )}
+
+      {/* Click-outside to close dropdown */}
+      {showTournamentDropdown && (
+        <div className="fixed inset-0 z-40" onClick={() => setShowTournamentDropdown(false)} />
       )}
     </div>
   );

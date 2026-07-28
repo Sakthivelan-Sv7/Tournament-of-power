@@ -40,6 +40,7 @@ export interface Team {
   color_hex: string;
   captain_id?: string;
   nation?: string; // ISO 3166-1 alpha-2 country code e.g. 'BR', 'DE'
+  status?: 'pending' | 'accepted' | 'rejected';
 }
 
 // Player type definition
@@ -74,6 +75,7 @@ export interface PollVote {
 export interface Profile {
   id: string;
   role: 'admin' | 'user';
+  email?: string; // added for admin list
   created_at?: string;
 }
 
@@ -228,10 +230,11 @@ export const db = {
   },
 
   // Teams
-  async registerTeam(team: Omit<Team, 'id'>): Promise<Team> {
+  async registerTeam(team: Omit<Team, 'id' | 'status'>): Promise<Team> {
     const newTeam: Team = {
       ...team,
-      id: crypto.randomUUID()
+      id: crypto.randomUUID(),
+      status: 'pending'
     };
 
     if (isSupabaseConfigured()) {
@@ -246,13 +249,27 @@ export const db = {
     return newTeam;
   },
 
-  async getTeams(tournamentId: string): Promise<Team[]> {
+  async getTeams(tournamentId: string, status?: 'pending' | 'accepted' | 'rejected'): Promise<Team[]> {
     if (isSupabaseConfigured()) {
-      const { data, error } = await supabase.from('teams').select('*').eq('tournament_id', tournamentId);
+      let query = supabase.from('teams').select('*').eq('tournament_id', tournamentId);
+      if (status) query = query.eq('status', status);
+      const { data, error } = await query;
       if (!error && data) return data as Team[];
     }
     const teams = getLocal<Team[]>('top_teams', []);
-    return teams.filter(t => t.tournament_id === tournamentId);
+    return teams.filter(t => t.tournament_id === tournamentId && (!status || t.status === status));
+  },
+
+  async updateTeamStatus(teamId: string, status: 'pending' | 'accepted' | 'rejected'): Promise<void> {
+    if (isSupabaseConfigured()) {
+      await supabase.from('teams').update({ status }).eq('id', teamId);
+    }
+    const teams = getLocal<Team[]>('top_teams', []);
+    const idx = teams.findIndex(t => t.id === teamId);
+    if (idx !== -1) {
+      teams[idx].status = status;
+      setLocal('top_teams', teams);
+    }
   },
 
   async updateTeamCaptain(teamId: string, captainId: string): Promise<void> {
@@ -605,6 +622,26 @@ export const db = {
     const { data, error } = await supabase.rpc('make_admin_by_email', { target_email: email });
     if (error) {
       console.error('Error making user admin:', error);
+      return false;
+    }
+    return !!data;
+  },
+
+  async getAdmins(): Promise<Profile[]> {
+    if (!isSupabaseConfigured()) return [];
+    const { data, error } = await supabase.rpc('get_admins');
+    if (error) {
+      console.error('Error fetching admins:', error);
+      return [];
+    }
+    return data as Profile[];
+  },
+
+  async removeAdmin(email: string): Promise<boolean> {
+    if (!isSupabaseConfigured()) return false;
+    const { data, error } = await supabase.rpc('remove_admin', { target_email: email });
+    if (error) {
+      console.error('Error removing admin:', error);
       return false;
     }
     return !!data;
