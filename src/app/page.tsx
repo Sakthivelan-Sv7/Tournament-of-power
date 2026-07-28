@@ -13,9 +13,10 @@ import { AdminManagement } from '../components/AdminManagement';
 import { generateRoundRobinFixtures, generateKnockoutRound1 } from '../utils/formatEngine';
 import {
   Trophy, Calendar, Users, ShieldAlert, Award, RefreshCw,
-  Zap, Shield, Plus, ChevronDown, Sparkles
+  Zap, Shield, Plus, ChevronDown, Sparkles, Clock
 } from 'lucide-react';
 import { Avatar } from '../components/Avatar';
+import Link from 'next/link';
 
 export default function HomePage() {
   const [tournaments, setTournaments] = useState<Tournament[]>([]);
@@ -287,6 +288,17 @@ export default function HomePage() {
                 {supabaseConnected ? 'Supabase' : 'Local'}
               </span>
             </div>
+
+            {/* Pending Approvals — Admins only */}
+            {isAdmin && session && (
+              <Link
+                href="/admin/approvals"
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/20 hover:border-amber-500/50 rounded-xl text-xs font-bold transition-all"
+              >
+                <Clock className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Pending Approvals</span>
+              </Link>
+            )}
 
             {/* Create Tournament — Admins only */}
             {isAdmin && session && (

@@ -323,6 +323,10 @@ export const db = {
 
   async assignPlayerToTeam(playerId: string, teamId: string | null): Promise<void> {
     if (isSupabaseConfigured()) {
+      if (teamId === null) {
+        // Clear captaincy if the player is removed from the team
+        await supabase.from('teams').update({ captain_id: null }).eq('captain_id', playerId);
+      }
       await supabase.from('players').update({ team_id: teamId }).eq('id', playerId);
     }
     const players = getLocal<Player[]>('top_players', []);
@@ -330,6 +334,15 @@ export const db = {
     if (idx !== -1) {
       players[idx].team_id = teamId || undefined;
       setLocal('top_players', players);
+    }
+
+    if (teamId === null) {
+      const teams = getLocal<Team[]>('top_teams', []);
+      const teamIdx = teams.findIndex(t => t.captain_id === playerId);
+      if (teamIdx !== -1) {
+        teams[teamIdx].captain_id = undefined;
+        setLocal('top_teams', teams);
+      }
     }
   },
 
@@ -645,5 +658,26 @@ export const db = {
       return false;
     }
     return !!data;
+  },
+
+  async deleteTeam(teamId: string): Promise<void> {
+    if (isSupabaseConfigured()) {
+      const { error } = await supabase.from('teams').delete().eq('id', teamId);
+      if (error) throw new Error(error.message);
+    }
+    // Local storage mock fallback
+    const teams = getLocal<Team[]>('top_teams', []);
+    const filteredTeams = teams.filter(t => t.id !== teamId);
+    setLocal('top_teams', filteredTeams);
+
+    // Cascade delete players in local storage
+    const players = getLocal<Player[]>('top_players', []);
+    const filteredPlayers = players.filter(p => p.team_id !== teamId);
+    setLocal('top_players', filteredPlayers);
+
+    // Cascade delete matches in local storage
+    const matches = getLocal<Match[]>('top_matches', []);
+    const filteredMatches = matches.filter(m => m.team_a_id !== teamId && m.team_b_id !== teamId);
+    setLocal('top_matches', filteredMatches);
   }
 };

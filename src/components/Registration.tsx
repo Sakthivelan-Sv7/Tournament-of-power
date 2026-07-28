@@ -6,7 +6,7 @@ import { Avatar } from './Avatar';
 import {
   Plus, UserPlus, Upload, Shield, Users, Trophy,
   CheckCircle, XCircle, Clock, ChevronDown, ChevronUp,
-  AlertTriangle, Loader2
+  AlertTriangle, Loader2, Trash2
 } from 'lucide-react';
 
 interface RegistrationProps {
@@ -291,6 +291,37 @@ export const Registration: React.FC<RegistrationProps> = ({
       console.error(err);
     } finally {
       setPlayerLoading(false);
+    }
+  };
+
+  const handleDeleteTeam = async (teamId: string, teamName: string) => {
+    const isMidTournament = tournament.status === 'active' || tournament.status === 'completed';
+    const message = isMidTournament
+      ? `WARNING: Deleting "${teamName}" mid-tournament will permanently remove the team, its roster, and ALL associated matches and events. Standings and fixtures will recalculate immediately. This action cannot be undone.\n\nAre you sure you want to proceed?`
+      : `Are you sure you want to delete the team "${teamName}"? This will delete all players and matches associated with the team. This action is irreversible.`;
+
+    if (!confirm(message)) return;
+
+    try {
+      await db.deleteTeam(teamId);
+      loadTeamsAndPlayers();
+      onTeamsUpdated?.();
+    } catch (err) {
+      console.error('Error deleting team:', err);
+      alert('Failed to delete team. Please try again.');
+    }
+  };
+
+  const handleRemovePlayer = async (playerId: string, playerName: string, teamName: string) => {
+    if (!confirm(`Are you sure you want to remove "${playerName}" from "${teamName}"? They will be returned to the unassigned Draft Pool.`)) return;
+
+    try {
+      await db.assignPlayerToTeam(playerId, null);
+      loadTeamsAndPlayers();
+      onTeamsUpdated?.();
+    } catch (err) {
+      console.error('Error removing player:', err);
+      alert('Failed to remove player. Please try again.');
     }
   };
 
@@ -621,7 +652,18 @@ export const Registration: React.FC<RegistrationProps> = ({
                               )}
                             </div>
                           </div>
-                          <div className="w-5 h-5 rounded-full border border-white/10" style={{ backgroundColor: t.color_hex }} />
+                          <div className="flex items-center gap-2">
+                            <div className="w-5 h-5 rounded-full border border-white/10" style={{ backgroundColor: t.color_hex }} />
+                            {isAdmin && (
+                              <button
+                                onClick={() => handleDeleteTeam(t.id, t.name)}
+                                className="p-1 text-nebula-gray hover:text-error hover:bg-error/10 rounded-lg transition-all"
+                                title="Delete Team"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            )}
+                          </div>
                         </div>
                         <div className="border-t border-white/5 pt-3">
                           <span className="text-[10px] uppercase font-bold tracking-widest text-nebula-gray mb-2 block">Roster ({teamRoster.length})</span>
@@ -639,6 +681,15 @@ export const Registration: React.FC<RegistrationProps> = ({
                                     <span className="text-[9px] bg-surface text-nebula-gray px-1.5 py-0.5 rounded font-mono uppercase">{player.role.substring(0, 3)}</span>
                                     {t.captain_id === player.id && (
                                       <span className="text-[9px] bg-accent-gold/20 text-accent-gold px-1.5 py-0.5 rounded font-mono font-bold uppercase">CPT</span>
+                                    )}
+                                    {isAdmin && (
+                                      <button
+                                        onClick={() => handleRemovePlayer(player.id, player.name, t.name)}
+                                        className="p-0.5 text-nebula-gray hover:text-error hover:bg-error/10 rounded transition-all"
+                                        title="Remove Player"
+                                      >
+                                        <XCircle className="w-3.5 h-3.5" />
+                                      </button>
                                     )}
                                   </div>
                                 </div>
