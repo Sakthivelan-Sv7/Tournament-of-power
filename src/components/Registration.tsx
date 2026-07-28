@@ -6,7 +6,7 @@ import { Avatar } from './Avatar';
 import {
   Plus, UserPlus, Upload, Shield, Users, Trophy,
   CheckCircle, XCircle, Clock, ChevronDown, ChevronUp,
-  AlertTriangle, Loader2, Trash2
+  AlertTriangle, Loader2, Trash2, Pencil, Save, X
 } from 'lucide-react';
 
 interface RegistrationProps {
@@ -119,11 +119,17 @@ export const Registration: React.FC<RegistrationProps> = ({
   // Show/hide pending section for admin
   const [showPending, setShowPending] = useState(true);
 
+  // Player inline edit state
+  const [editingPlayerId, setEditingPlayerId] = useState<string | null>(null);
+  const [editPlayerName, setEditPlayerName] = useState('');
+  const [editPlayerRole, setEditPlayerRole] = useState('');
+  const [editSaving, setEditSaving] = useState(false);
+
   const loadTeamsAndPlayers = useCallback(async () => {
     try {
       const all = await db.getTeams(tournament.id);
-      const accepted = all.filter(t => t.status === 'accepted' || !t.status); // backwards compat
-      const pending = all.filter(t => t.status === 'pending');
+      const accepted = all.filter(t => t.status === 'accepted');
+      const pending = all.filter(t => !t.status || t.status === 'pending');
 
       setAllTeams(all);
       setAcceptedTeams(accepted);
@@ -322,6 +328,31 @@ export const Registration: React.FC<RegistrationProps> = ({
     } catch (err) {
       console.error('Error removing player:', err);
       alert('Failed to remove player. Please try again.');
+    }
+  };
+
+  const handleEditPlayer = (player: Player) => {
+    setEditingPlayerId(player.id);
+    setEditPlayerName(player.name);
+    setEditPlayerRole(player.role);
+  };
+
+  const handleSavePlayer = async (playerId: string) => {
+    if (!editPlayerName.trim()) return;
+    setEditSaving(true);
+    try {
+      await db.updatePlayer(playerId, {
+        name: editPlayerName.trim(),
+        role: editPlayerRole,
+      });
+      setEditingPlayerId(null);
+      loadTeamsAndPlayers();
+      onTeamsUpdated?.();
+    } catch (err) {
+      console.error('Error updating player:', err);
+      alert('Failed to save player details. Please try again.');
+    } finally {
+      setEditSaving(false);
     }
   };
 
@@ -672,26 +703,77 @@ export const Registration: React.FC<RegistrationProps> = ({
                           ) : (
                             <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
                               {teamRoster.map(player => (
-                                <div key={player.id} className="flex items-center justify-between p-1.5 bg-background/50 rounded-lg border border-white/5">
-                                  <div className="flex items-center gap-2">
-                                    <Avatar src={player.photo_url} name={player.name} size="xs" colorHex={t.color_hex} />
-                                    <span className="text-xs text-foreground font-medium">{player.name}</span>
-                                  </div>
-                                  <div className="flex items-center gap-1.5">
-                                    <span className="text-[9px] bg-surface text-nebula-gray px-1.5 py-0.5 rounded font-mono uppercase">{player.role.substring(0, 3)}</span>
-                                    {t.captain_id === player.id && (
-                                      <span className="text-[9px] bg-accent-gold/20 text-accent-gold px-1.5 py-0.5 rounded font-mono font-bold uppercase">CPT</span>
-                                    )}
-                                    {isAdmin && (
-                                      <button
-                                        onClick={() => handleRemovePlayer(player.id, player.name, t.name)}
-                                        className="p-0.5 text-nebula-gray hover:text-error hover:bg-error/10 rounded transition-all"
-                                        title="Remove Player"
-                                      >
-                                        <XCircle className="w-3.5 h-3.5" />
-                                      </button>
-                                    )}
-                                  </div>
+                                <div key={player.id} className="border border-white/5 rounded-lg overflow-hidden bg-background/50">
+                                  {editingPlayerId === player.id ? (
+                                    // ─── Inline edit row ───
+                                    <div className="p-2 space-y-2">
+                                      <div className="flex items-center gap-2">
+                                        <Avatar src={player.photo_url} name={player.name} size="xs" colorHex={t.color_hex} />
+                                        <input
+                                          autoFocus
+                                          value={editPlayerName}
+                                          onChange={e => setEditPlayerName(e.target.value)}
+                                          className="flex-1 bg-surface border border-accent-cyan/30 focus:border-accent-cyan rounded-lg px-2 py-1 text-xs text-foreground outline-none"
+                                          placeholder="Player name"
+                                        />
+                                        <select
+                                          value={editPlayerRole}
+                                          onChange={e => setEditPlayerRole(e.target.value)}
+                                          className="bg-surface border border-white/10 text-xs text-foreground rounded-lg px-1.5 py-1 outline-none"
+                                        >
+                                          {ROLES.map(r => <option key={r} value={r}>{r}</option>)}
+                                        </select>
+                                      </div>
+                                      <div className="flex items-center justify-end gap-2">
+                                        <button
+                                          onClick={() => setEditingPlayerId(null)}
+                                          className="flex items-center gap-1 px-2.5 py-1 text-[10px] font-bold text-nebula-gray border border-white/10 hover:border-white/20 rounded-lg transition-all"
+                                        >
+                                          <X className="w-3 h-3" /> Cancel
+                                        </button>
+                                        <button
+                                          onClick={() => handleSavePlayer(player.id)}
+                                          disabled={editSaving}
+                                          className="flex items-center gap-1 px-2.5 py-1 text-[10px] font-bold text-success border border-success/20 bg-success/5 hover:bg-success/15 rounded-lg transition-all disabled:opacity-50"
+                                        >
+                                          {editSaving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}
+                                          Save
+                                        </button>
+                                      </div>
+                                    </div>
+                                  ) : (
+                                    // ─── Normal player row ───
+                                    <div className="flex items-center justify-between p-1.5">
+                                      <div className="flex items-center gap-2">
+                                        <Avatar src={player.photo_url} name={player.name} size="xs" colorHex={t.color_hex} />
+                                        <span className="text-xs text-foreground font-medium">{player.name}</span>
+                                      </div>
+                                      <div className="flex items-center gap-1.5">
+                                        <span className="text-[9px] bg-surface text-nebula-gray px-1.5 py-0.5 rounded font-mono uppercase">{player.role.substring(0, 3)}</span>
+                                        {t.captain_id === player.id && (
+                                          <span className="text-[9px] bg-accent-gold/20 text-accent-gold px-1.5 py-0.5 rounded font-mono font-bold uppercase">CPT</span>
+                                        )}
+                                        {isAdmin && (
+                                          <>
+                                            <button
+                                              onClick={() => handleEditPlayer(player)}
+                                              className="p-0.5 text-nebula-gray hover:text-accent-cyan hover:bg-accent-cyan/10 rounded transition-all"
+                                              title="Edit Player"
+                                            >
+                                              <Pencil className="w-3.5 h-3.5" />
+                                            </button>
+                                            <button
+                                              onClick={() => handleRemovePlayer(player.id, player.name, t.name)}
+                                              className="p-0.5 text-nebula-gray hover:text-error hover:bg-error/10 rounded transition-all"
+                                              title="Remove Player"
+                                            >
+                                              <XCircle className="w-3.5 h-3.5" />
+                                            </button>
+                                          </>
+                                        )}
+                                      </div>
+                                    </div>
+                                  )}
                                 </div>
                               ))}
                             </div>

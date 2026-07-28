@@ -302,6 +302,19 @@ export const db = {
     return newPlayer;
   },
 
+  async updatePlayer(playerId: string, updates: Partial<Pick<Player, 'name' | 'role' | 'photo_url'>>): Promise<void> {
+    if (isSupabaseConfigured()) {
+      const { error } = await supabase.from('players').update(updates).eq('id', playerId);
+      if (error) throw new Error(error.message);
+    }
+    const players = getLocal<Player[]>('top_players', []);
+    const idx = players.findIndex(p => p.id === playerId);
+    if (idx !== -1) {
+      players[idx] = { ...players[idx], ...updates };
+      setLocal('top_players', players);
+    }
+  },
+
   async getPlayers(teamId: string): Promise<Player[]> {
     if (isSupabaseConfigured()) {
       const { data, error } = await supabase.from('players').select('*').eq('team_id', teamId);
