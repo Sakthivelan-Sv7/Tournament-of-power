@@ -93,7 +93,8 @@ export default function ApprovalsPage() {
   const loadPendingTeamsAndRosters = useCallback(async (tournamentId: string) => {
     try {
       const all = await db.getTeams(tournamentId);
-      const pending = all.filter(t => t.status === 'pending');
+      // Accept either explicit 'pending' status or missing/undefined (fallback cases)
+      const pending = all.filter(t => !t.status || t.status === 'pending');
       setPendingTeams(pending);
 
       const allPlayers = await db.getTournamentPlayers(tournamentId);

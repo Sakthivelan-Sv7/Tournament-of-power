@@ -251,9 +251,13 @@ export const db = {
 
   async getTeams(tournamentId: string, status?: 'pending' | 'accepted' | 'rejected'): Promise<Team[]> {
     if (isSupabaseConfigured()) {
-      let query = supabase.from('teams').select('*').eq('tournament_id', tournamentId);
+      // Explicitly select known team columns to ensure 'status' is returned and to avoid surprises
+      let query = supabase.from('teams').select('id, tournament_id, name, logo_url, color_hex, captain_id, nation, status, created_at').eq('tournament_id', tournamentId);
       if (status) query = query.eq('status', status);
       const { data, error } = await query;
+      if (error) {
+        console.error('Supabase getTeams error:', error);
+      }
       if (!error && data) return data as Team[];
     }
     const teams = getLocal<Team[]>('top_teams', []);
