@@ -190,10 +190,11 @@ export const db = {
 
     if (isSupabaseConfigured()) {
       const { data, error } = await supabase.from('tournaments').insert([newTournament]).select().single();
-      if (!error && data) return data as Tournament;
-      console.error("Supabase createTournament error, falling back to local:", error);
+      if (error) throw new Error(error.message);
+      return data as Tournament;
     }
 
+    // Offline-only fallback
     const tournaments = getLocal<Tournament[]>('top_tournaments', []);
     tournaments.push(newTournament);
     setLocal('top_tournaments', tournaments);
@@ -219,7 +220,9 @@ export const db = {
 
   async updateTournamentStatus(id: string, status: Tournament['status']): Promise<void> {
     if (isSupabaseConfigured()) {
-      await supabase.from('tournaments').update({ status }).eq('id', id);
+      const { error } = await supabase.from('tournaments').update({ status }).eq('id', id);
+      if (error) throw new Error(error.message);
+      return;
     }
     const tournaments = getLocal<Tournament[]>('top_tournaments', []);
     const idx = tournaments.findIndex(t => t.id === id);
@@ -227,6 +230,28 @@ export const db = {
       tournaments[idx].status = status;
       setLocal('top_tournaments', tournaments);
     }
+  },
+
+  async deleteTournament(id: string): Promise<void> {
+    if (isSupabaseConfigured()) {
+      // CASCADE on the DB handles teams, players, matches, events
+      const { error } = await supabase.from('tournaments').delete().eq('id', id);
+      if (error) throw new Error(error.message);
+      return;
+    }
+    // Offline fallback: manually cascade
+    const tournaments = getLocal<Tournament[]>('top_tournaments', []);
+    setLocal('top_tournaments', tournaments.filter(t => t.id !== id));
+    const teams = getLocal<Team[]>('top_teams', []);
+    const removedTeamIds = teams.filter(t => t.tournament_id === id).map(t => t.id);
+    setLocal('top_teams', teams.filter(t => t.tournament_id !== id));
+    const players = getLocal<Player[]>('top_players', []);
+    setLocal('top_players', players.filter(p => !removedTeamIds.includes(p.team_id || '')));
+    const matches = getLocal<Match[]>('top_matches', []);
+    const removedMatchIds = matches.filter(m => m.tournament_id === id).map(m => m.id);
+    setLocal('top_matches', matches.filter(m => m.tournament_id !== id));
+    const events = getLocal<MatchEvent[]>('top_match_events', []);
+    setLocal('top_match_events', events.filter(e => !removedMatchIds.includes(e.match_id)));
   },
 
   // Teams
@@ -239,10 +264,11 @@ export const db = {
 
     if (isSupabaseConfigured()) {
       const { data, error } = await supabase.from('teams').insert([newTeam]).select().single();
-      if (!error && data) return data as Team;
-      console.error("Supabase registerTeam error:", error);
+      if (error) throw new Error(error.message);
+      return data as Team;
     }
 
+    // Offline-only fallback
     const teams = getLocal<Team[]>('top_teams', []);
     teams.push(newTeam);
     setLocal('top_teams', teams);
@@ -266,7 +292,9 @@ export const db = {
 
   async updateTeamStatus(teamId: string, status: 'pending' | 'accepted' | 'rejected'): Promise<void> {
     if (isSupabaseConfigured()) {
-      await supabase.from('teams').update({ status }).eq('id', teamId);
+      const { error } = await supabase.from('teams').update({ status }).eq('id', teamId);
+      if (error) throw new Error(error.message);
+      return;
     }
     const teams = getLocal<Team[]>('top_teams', []);
     const idx = teams.findIndex(t => t.id === teamId);
@@ -297,9 +325,11 @@ export const db = {
 
     if (isSupabaseConfigured()) {
       const { data, error } = await supabase.from('players').insert([newPlayer]).select().single();
-      if (!error && data) return data as Player;
+      if (error) throw new Error(error.message);
+      return data as Player;
     }
 
+    // Offline-only fallback
     const players = getLocal<Player[]>('top_players', []);
     players.push(newPlayer);
     setLocal('top_players', players);
@@ -374,9 +404,11 @@ export const db = {
 
     if (isSupabaseConfigured()) {
       const { data, error } = await supabase.from('matches').insert(newMatches).select();
-      if (!error && data) return data as Match[];
+      if (error) throw new Error(error.message);
+      return data as Match[];
     }
 
+    // Offline-only fallback
     const matches = getLocal<Match[]>('top_matches', []);
     matches.push(...newMatches);
     setLocal('top_matches', matches);
@@ -427,7 +459,9 @@ export const db = {
 
   async updateMatchStatus(matchId: string, status: Match['status']): Promise<void> {
     if (isSupabaseConfigured()) {
-      await supabase.from('matches').update({ status }).eq('id', matchId);
+      const { error } = await supabase.from('matches').update({ status }).eq('id', matchId);
+      if (error) throw new Error(error.message);
+      return;
     }
     const matches = getLocal<Match[]>('top_matches', []);
     const idx = matches.findIndex(m => m.id === matchId);
@@ -455,9 +489,11 @@ export const db = {
 
     if (isSupabaseConfigured()) {
       const { data, error } = await supabase.from('match_events').insert([newEvent]).select().single();
-      if (!error && data) return data as MatchEvent;
+      if (error) throw new Error(error.message);
+      return data as MatchEvent;
     }
 
+    // Offline-only fallback
     const events = getLocal<MatchEvent[]>('top_match_events', []);
     events.push(newEvent);
     setLocal('top_match_events', events);

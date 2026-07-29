@@ -173,23 +173,13 @@ export default function HomePage() {
     }
   };
 
-  // ADMIN ONLY — Reset system
-  const handleResetTournament = async () => {
+  // ADMIN ONLY — Delete the current tournament (and all its data)
+  const handleDeleteTournament = async () => {
     if (profile?.role !== 'admin') return;
-    if (!confirm('DANGER: This will delete ALL teams, players, and match records for this tournament. Continue?')) return;
+    if (!activeTournament) return;
+    if (!confirm(`DELETE "${activeTournament.name}"? This will permanently remove all its teams, players, matches and events. This cannot be undone.`)) return;
     try {
-      if (activeTournament) {
-        if (db.isSupabaseConfigured()) {
-          const { supabase } = await import('../utils/supabaseClient');
-          await supabase.from('tournaments').delete().eq('id', activeTournament.id);
-        } else {
-          localStorage.removeItem('top_tournaments');
-          localStorage.removeItem('top_teams');
-          localStorage.removeItem('top_players');
-          localStorage.removeItem('top_matches');
-          localStorage.removeItem('top_match_events');
-        }
-      }
+      await db.deleteTournament(activeTournament.id);
       setActiveTournament(null);
       setTeams([]);
       setSelectedMatchId(null);
@@ -198,6 +188,7 @@ export default function HomePage() {
       triggerRefresh();
     } catch (err) {
       console.error(err);
+      alert(`Failed to delete tournament: ${(err as Error).message}`);
     }
   };
 
@@ -311,14 +302,14 @@ export default function HomePage() {
               </button>
             )}
 
-            {/* Reset System — ADMIN ONLY */}
+            {/* Delete Tournament — ADMIN ONLY */}
             {isAdmin && activeTournament && (
               <button
-                onClick={handleResetTournament}
+                onClick={handleDeleteTournament}
                 className="flex items-center gap-1.5 px-3 py-1.5 border border-error/20 bg-error/5 hover:bg-error/10 text-error hover:border-error rounded-xl text-xs font-bold transition-all"
               >
                 <RefreshCw className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">Reset</span>
+                <span className="hidden sm:inline">Delete Tournament</span>
               </button>
             )}
           </div>
@@ -475,7 +466,7 @@ export default function HomePage() {
                   )}
 
                   {activeTab === 'standings' && (
-                    <PointsTable tournament={activeTournament} refreshTrigger={refreshTrigger} />
+                    <PointsTable key={activeTournament.id} tournament={activeTournament} refreshTrigger={refreshTrigger} />
                   )}
 
                   {activeTab === 'admins' && isAdmin && (
