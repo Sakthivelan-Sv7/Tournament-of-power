@@ -150,6 +150,10 @@ export default function HomePage() {
     if (!activeTournament || teams.length < 2) return;
 
     try {
+      // Always clear existing fixtures first — makes this call idempotent.
+      // Cascade on the DB wipes match_events automatically; offline fallback does it too.
+      await db.clearMatches(activeTournament.id);
+
       let generatedMatches: any[] = [];
       if (activeTournament.format === 'league') {
         generatedMatches = generateRoundRobinFixtures(activeTournament.id, teams, false);
@@ -189,6 +193,35 @@ export default function HomePage() {
     } catch (err) {
       console.error(err);
       alert(`Failed to delete tournament: ${(err as Error).message}`);
+    }
+  };
+
+  // ADMIN ONLY — Restart the current tournament:
+  // Clears all matches + events (cascade), resets status to 'draft'.
+  // Teams and rosters are completely untouched — no re-registration needed.
+  const handleRestartTournament = async () => {
+    if (profile?.role !== 'admin') return;
+    if (!activeTournament) return;
+    if (
+      !confirm(
+        `RESTART "${activeTournament.name}"?\n\n` +
+        `This will DELETE all matches and match events for this tournament and ` +
+        `reset its status back to Draft so you can regenerate fixtures.\n\n` +
+        `Teams and player rosters are NOT affected — no re-registration required.\n\n` +
+        `This cannot be undone.`
+      )
+    ) return;
+    try {
+      await db.restartTournament(activeTournament.id);
+      // Reflect the status change locally without a full page reload
+      setActiveTournament(prev => prev ? { ...prev, status: 'draft' } : null);
+      setSelectedMatchId(null);
+      setChampion(null);
+      setActiveTab('registry');
+      triggerRefresh();
+    } catch (err) {
+      console.error(err);
+      alert(`Failed to restart tournament: ${(err as Error).message}`);
     }
   };
 
@@ -448,6 +481,7 @@ export default function HomePage() {
                     <Registration
                       tournament={activeTournament}
                       onActiveTrigger={handleActivateTournament}
+                      onRestartTrigger={isAdmin ? handleRestartTournament : undefined}
                       onTeamsUpdated={reloadTeams}
                       isAdmin={isAdmin}
                       session={session}

@@ -6,12 +6,13 @@ import { Avatar } from './Avatar';
 import {
   Plus, UserPlus, Upload, Shield, Users, Trophy,
   CheckCircle, XCircle, Clock, ChevronDown, ChevronUp,
-  AlertTriangle, Loader2, Trash2, Pencil, Save, X
+  AlertTriangle, Loader2, Trash2, Pencil, Save, X, RotateCcw
 } from 'lucide-react';
 
 interface RegistrationProps {
   tournament: Tournament;
   onActiveTrigger: () => void;
+  onRestartTrigger?: () => void;
   onTeamsUpdated?: () => void;
   isAdmin?: boolean;
   session?: any;
@@ -70,6 +71,7 @@ const StatusBadge: React.FC<{ status?: string }> = ({ status }) => {
 export const Registration: React.FC<RegistrationProps> = ({
   tournament,
   onActiveTrigger,
+  onRestartTrigger,
   onTeamsUpdated,
   isAdmin,
   session,
@@ -374,24 +376,41 @@ export const Registration: React.FC<RegistrationProps> = ({
         </div>
 
         {isAdmin ? (
-          acceptedTeams.length >= 2 ? (
-            <button
-              onClick={onActiveTrigger}
-              className="flex items-center justify-center gap-2 px-6 py-3.5 bg-accent-gold hover:bg-yellow-400 text-background rounded-xl text-xs font-extrabold tracking-wider uppercase transition-all shadow-[0_0_15px_rgba(250,204,21,0.2)] hover:shadow-[0_0_20px_rgba(250,204,21,0.4)]"
-            >
-              <Trophy className="w-4 h-4" />
-              <span>Generate Fixtures & Start</span>
-            </button>
-          ) : (
-            <div className="text-right">
-              <span className="text-xs text-error font-mono font-medium block">
-                [LOCKED] Requires minimum 2 accepted teams
-              </span>
-              <span className="text-[10px] text-nebula-gray block mt-0.5">
-                Accept pending team requests to begin.
-              </span>
-            </div>
-          )
+          <div className="flex flex-col sm:flex-row items-center gap-3">
+            {/* Restart button — shown when tournament has already been activated */}
+            {(tournament.status === 'active' || tournament.status === 'completed') && onRestartTrigger && (
+              <button
+                onClick={onRestartTrigger}
+                className="flex items-center justify-center gap-2 px-5 py-3 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 hover:border-amber-500/60 rounded-xl text-xs font-extrabold tracking-wider uppercase transition-all"
+                title="Clear all matches and reset to Draft — teams and rosters are untouched"
+              >
+                <RotateCcw className="w-4 h-4" />
+                <span>Restart Tournament</span>
+              </button>
+            )}
+
+            {/* Generate Fixtures — shown only in draft/pre-active state */}
+            {tournament.status === 'draft' && (
+              acceptedTeams.length >= 2 ? (
+                <button
+                  onClick={onActiveTrigger}
+                  className="flex items-center justify-center gap-2 px-6 py-3.5 bg-accent-gold hover:bg-yellow-400 text-background rounded-xl text-xs font-extrabold tracking-wider uppercase transition-all shadow-[0_0_15px_rgba(250,204,21,0.2)] hover:shadow-[0_0_20px_rgba(250,204,21,0.4)]"
+                >
+                  <Trophy className="w-4 h-4" />
+                  <span>Generate Fixtures &amp; Start</span>
+                </button>
+              ) : (
+                <div className="text-right">
+                  <span className="text-xs text-error font-mono font-medium block">
+                    [LOCKED] Requires minimum 2 accepted teams
+                  </span>
+                  <span className="text-[10px] text-nebula-gray block mt-0.5">
+                    Accept pending team requests to begin.
+                  </span>
+                </div>
+              )
+            )}
+          </div>
         ) : (
           <div className="text-right">
             <span className="text-xs text-nebula-gray font-mono">Register your team below</span>

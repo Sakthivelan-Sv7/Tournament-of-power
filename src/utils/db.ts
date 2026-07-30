@@ -473,11 +473,26 @@ export const db = {
 
   async clearMatches(tournamentId: string): Promise<void> {
     if (isSupabaseConfigured()) {
-      await supabase.from('matches').delete().eq('tournament_id', tournamentId);
+      // ON DELETE CASCADE on match_events(match_id) handles events automatically
+      const { error } = await supabase.from('matches').delete().eq('tournament_id', tournamentId);
+      if (error) throw new Error(error.message);
+      return;
     }
+    // Offline fallback: cascade-delete events manually before removing matches
     const matches = getLocal<Match[]>('top_matches', []);
-    const filtered = matches.filter(m => m.tournament_id !== tournamentId);
-    setLocal('top_matches', filtered);
+    const removedMatchIds = new Set(
+      matches.filter(m => m.tournament_id === tournamentId).map(m => m.id)
+    );
+    setLocal('top_matches', matches.filter(m => m.tournament_id !== tournamentId));
+    const events = getLocal<MatchEvent[]>('top_match_events', []);
+    setLocal('top_match_events', events.filter(e => !removedMatchIds.has(e.match_id)));
+  },
+
+  // Restart a tournament: wipe all matches + events, reset status to 'draft'.
+  // Teams and players are intentionally left completely untouched.
+  async restartTournament(tournamentId: string): Promise<void> {
+    await this.clearMatches(tournamentId);
+    await this.updateTournamentStatus(tournamentId, 'draft');
   },
 
   // Match Events
@@ -571,7 +586,7 @@ export const db = {
     const t = tournaments.find(x => x.id === tournamentId);
     if (!t) return [];
 
-    const teams = getLocal<Team[]>('top_teams', []).filter(x => x.tournament_id === tournamentId);
+    const teams = getLocal<Team[]>('top_teams', []).filter(x => x.tournament_id === tournamentId && x.status === 'accepted');
     const allMatches = getLocal<Match[]>('top_matches', []).filter(x => x.tournament_id === tournamentId);
     const allEvents = getLocal<MatchEvent[]>('top_match_events', []);
 
