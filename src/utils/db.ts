@@ -458,16 +458,23 @@ export const db = {
   },
 
   async updateMatchStatus(matchId: string, status: Match['status']): Promise<void> {
+    let supabaseSuccess = false;
     if (isSupabaseConfigured()) {
-      const { error } = await supabase.from('matches').update({ status }).eq('id', matchId);
-      if (error) throw new Error(error.message);
-      return;
+      try {
+        const { error } = await supabase.from('matches').update({ status }).eq('id', matchId);
+        if (!error) supabaseSuccess = true;
+      } catch (err) {
+        console.error('Supabase updateMatchStatus failed, falling back to local', err);
+      }
     }
-    const matches = getLocal<Match[]>('top_matches', []);
-    const idx = matches.findIndex(m => m.id === matchId);
-    if (idx !== -1) {
-      matches[idx].status = status;
-      setLocal('top_matches', matches);
+    
+    if (!supabaseSuccess) {
+      const matches = getLocal<Match[]>('top_matches', []);
+      const idx = matches.findIndex(m => m.id === matchId);
+      if (idx !== -1) {
+        matches[idx].status = status;
+        setLocal('top_matches', matches);
+      }
     }
   },
 
@@ -631,20 +638,38 @@ export const db = {
 
       teamA.mp++;
       teamB.mp++;
+
+      // GF/GA always use raw (regular + extra time) score — penalty goals never count.
       teamA.gf += m.team_a_score;
       teamB.gf += m.team_b_score;
       teamA.ga += m.team_b_score;
       teamB.ga += m.team_a_score;
 
-      if (m.team_a_score > m.team_b_score) {
+      // Check for a penalty shootout winner stored in metadata.
+      // If present, override W/D/L — the higher raw score or draw is irrelevant for points.
+      const shootoutWinner: string | undefined = (m as any).metadata_jsonb?.shootout?.winner;
+
+      if (shootoutWinner) {
+        // Shootout decided — winner gets 3 pts, loser gets 0 pts; no draw recorded.
+        if (shootoutWinner === m.team_a_id) {
+          teamA.w++;
+          teamA.pts += 2;
+          teamB.l++;
+        } else {
+          teamB.w++;
+          teamB.pts += 2;
+          teamA.l++;
+        }
+      } else if (m.team_a_score > m.team_b_score) {
         teamA.w++;
-        teamA.pts += 3;
+        teamA.pts += 2;
         teamB.l++;
       } else if (m.team_a_score < m.team_b_score) {
         teamB.w++;
-        teamB.pts += 3;
+        teamB.pts += 2;
         teamA.l++;
       } else {
+        // Genuine draw — no shootout recorded.
         teamA.d++;
         teamA.pts += 1;
         teamB.d++;

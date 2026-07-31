@@ -145,7 +145,50 @@ export const Fixtures: React.FC<FixturesProps> = ({
 
   return (
     <>
-      <div className="w-full space-y-6">
+      {/* ── Atmospheric match-day background ──────────────────────────────── */}
+      <div aria-hidden="true" className="pointer-events-none fixed inset-0 z-0 overflow-hidden">
+        {/* Floodlight glow — top-left warm gold */}
+        <div
+          className="absolute -top-40 -left-40 w-[700px] h-[700px] rounded-full"
+          style={{
+            background: 'radial-gradient(ellipse at center, rgba(250,204,21,0.08) 0%, rgba(250,204,21,0.03) 45%, transparent 70%)',
+          }}
+        />
+        {/* Floodlight glow — bottom-right cool cyan */}
+        <div
+          className="absolute -bottom-40 -right-40 w-[600px] h-[600px] rounded-full"
+          style={{
+            background: 'radial-gradient(ellipse at center, rgba(34,211,238,0.06) 0%, rgba(34,211,238,0.02) 45%, transparent 70%)',
+          }}
+        />
+        {/* Subtle centre pitch-line grid */}
+        <svg
+          className="absolute inset-0 w-full h-full opacity-[0.028]"
+          xmlns="http://www.w3.org/2000/svg"
+          preserveAspectRatio="xMidYMid slice"
+        >
+          <defs>
+            <pattern id="pitch-grid" x="0" y="0" width="80" height="80" patternUnits="userSpaceOnUse">
+              <path d="M 80 0 L 0 0 0 80" fill="none" stroke="white" strokeWidth="0.5"/>
+            </pattern>
+            {/* Centre circle */}
+            <radialGradient id="pitch-vignette" cx="50%" cy="50%" r="50%">
+              <stop offset="0%" stopColor="white" stopOpacity="1" />
+              <stop offset="70%" stopColor="white" stopOpacity="0.4" />
+              <stop offset="100%" stopColor="white" stopOpacity="0" />
+            </radialGradient>
+            <mask id="pitch-fade">
+              <rect width="100%" height="100%" fill="url(#pitch-vignette)" />
+            </mask>
+          </defs>
+          <rect width="100%" height="100%" fill="url(#pitch-grid)" mask="url(#pitch-fade)" />
+          {/* Centre circle overlay */}
+          <circle cx="50%" cy="50%" r="120" fill="none" stroke="white" strokeWidth="0.5" opacity="0.5" mask="url(#pitch-fade)" />
+          <circle cx="50%" cy="50%" r="4" fill="white" opacity="0.4" />
+        </svg>
+      </div>
+
+      <div className="relative z-10 w-full space-y-6">
         {/* Header and Filter Controls */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
@@ -274,26 +317,33 @@ export const Fixtures: React.FC<FixturesProps> = ({
                           VS
                         </span>
                       ) : (
-                        <div className="flex items-center justify-center gap-1 font-mono text-xl font-bold bg-background border border-white/5 px-3 py-1.5 rounded-xl text-foreground">
-                          <span
-                            className={
-                              m.team_a_score! > m.team_b_score!
-                                ? 'text-accent-gold'
-                                : ''
-                            }
-                          >
-                            {m.team_a_score}
-                          </span>
-                          <span className="text-white/20">:</span>
-                          <span
-                            className={
-                              m.team_b_score! > m.team_a_score!
-                                ? 'text-accent-gold'
-                                : ''
-                            }
-                          >
-                            {m.team_b_score}
-                          </span>
+                        <div className="flex flex-col items-center gap-1.5">
+                          <div className="flex items-center justify-center gap-1 font-mono text-xl font-bold bg-background border border-white/5 px-3 py-1.5 rounded-xl text-foreground">
+                            <span
+                              className={
+                                m.team_a_score! > m.team_b_score! || (m as any).metadata_jsonb?.shootout?.winner === m.team_a_id
+                                  ? 'text-accent-gold'
+                                  : ''
+                              }
+                            >
+                              {m.team_a_score}
+                            </span>
+                            <span className="text-white/20">:</span>
+                            <span
+                              className={
+                                m.team_b_score! > m.team_a_score! || (m as any).metadata_jsonb?.shootout?.winner === m.team_b_id
+                                  ? 'text-accent-gold'
+                                  : ''
+                              }
+                            >
+                              {m.team_b_score}
+                            </span>
+                          </div>
+                          {(m as any).metadata_jsonb?.shootout && (
+                            <span className="text-[9px] font-mono font-bold text-accent-cyan uppercase tracking-widest bg-accent-cyan/10 px-2 py-0.5 rounded border border-accent-cyan/20">
+                              PENS: {(m as any).metadata_jsonb.shootout.team_a} - {(m as any).metadata_jsonb.shootout.team_b}
+                            </span>
+                          )}
                         </div>
                       )}
                     </div>

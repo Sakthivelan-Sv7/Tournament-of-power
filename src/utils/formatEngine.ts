@@ -184,8 +184,11 @@ export async function checkAndGenerateNextKnockoutRound(
     const match1 = sortedCurrentMatches[i * 2];
     const match2 = sortedCurrentMatches[i * 2 + 1];
 
-    const winner1 = match1.team_a_score! > match1.team_b_score! ? match1.team_a_id : match1.team_b_id;
-    const winner2 = match2.team_a_score! > match2.team_b_score! ? match2.team_a_id : match2.team_b_id;
+    const shootoutWinner1 = (match1 as any).metadata_jsonb?.shootout?.winner;
+    const winner1 = shootoutWinner1 || (match1.team_a_score! > match1.team_b_score! ? match1.team_a_id : match1.team_b_id);
+    
+    const shootoutWinner2 = (match2 as any).metadata_jsonb?.shootout?.winner;
+    const winner2 = shootoutWinner2 || (match2.team_a_score! > match2.team_b_score! ? match2.team_a_id : match2.team_b_id);
 
     const scheduledTime = new Date();
     scheduledTime.setDate(scheduledTime.getDate() + 2); // 2 days later
