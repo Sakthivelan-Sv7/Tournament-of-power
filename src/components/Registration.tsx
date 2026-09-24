@@ -6,8 +6,9 @@ import { Avatar } from './Avatar';
 import {
   Plus, UserPlus, Upload, Shield, Users, Trophy,
   CheckCircle, XCircle, Clock, ChevronDown, ChevronUp,
-  AlertTriangle, Loader2, Trash2, Pencil, Save, X, RotateCcw
+  AlertTriangle, Loader2, Trash2, Pencil, Save, X, RotateCcw, Shuffle
 } from 'lucide-react';
+import { assignTeamsToGroups } from '../utils/formatEngine';
 
 interface RegistrationProps {
   tournament: Tournament;
@@ -94,6 +95,7 @@ export const Registration: React.FC<RegistrationProps> = ({
   const [playerName, setPlayerName] = useState('');
   const [playerPhotoFile, setPlayerPhotoFile] = useState<File | null>(null);
   const [playerPhotoPreview, setPlayerPhotoPreview] = useState('');
+  const [playerRole, setPlayerRole] = useState('Midfielder');
   const [registerLoading, setRegisterLoading] = useState(false);
   const [registerSuccess, setRegisterSuccess] = useState('');
   const [registerError, setRegisterError] = useState('');
@@ -126,6 +128,11 @@ export const Registration: React.FC<RegistrationProps> = ({
   const [editPlayerName, setEditPlayerName] = useState('');
   const [editPlayerRole, setEditPlayerRole] = useState('');
   const [editSaving, setEditSaving] = useState(false);
+
+  // Group assignment state
+  const [groupSize, setGroupSize] = useState(4);
+  const [assignGroupsLoading, setAssignGroupsLoading] = useState(false);
+  const [assignGroupsError, setAssignGroupsError] = useState('');
 
   const loadTeamsAndPlayers = useCallback(async () => {
     try {
@@ -200,7 +207,7 @@ export const Registration: React.FC<RegistrationProps> = ({
         team_id: team.id,
         name: playerName,
         photo_url: playerPhotoPreview || undefined,
-        role: 'Player',
+        role: playerRole,
         user_id: session?.user?.id || undefined,
       });
 
@@ -358,6 +365,21 @@ export const Registration: React.FC<RegistrationProps> = ({
     }
   };
 
+  const handleAssignGroups = async () => {
+    setAssignGroupsError('');
+    setAssignGroupsLoading(true);
+    try {
+      const assignments = assignTeamsToGroups(acceptedTeams, groupSize);
+      await db.updateTeamGroups(assignments.map(a => ({ teamId: a.teamId, groupName: a.groupName })));
+      await loadTeamsAndPlayers();
+      onTeamsUpdated?.();
+    } catch (err: any) {
+      setAssignGroupsError(err.message || 'Failed to assign groups.');
+    } finally {
+      setAssignGroupsLoading(false);
+    }
+  };
+
   return (
     <div className="w-full space-y-8">
       {/* Tournament Status Header */}
@@ -387,6 +409,35 @@ export const Registration: React.FC<RegistrationProps> = ({
                 <RotateCcw className="w-4 h-4" />
                 <span>Restart Tournament</span>
               </button>
+            )}
+
+            {/* Group Assignment (Hybrid / Round of 16 Format) */}
+            {tournament.status === 'draft' && (tournament.format === 'hybrid' || tournament.format === 'round_16') && (
+              <div className="flex flex-col items-end gap-2 border-r border-white/10 pr-4 mr-1">
+                <div className="flex items-center gap-2">
+                  <label className="text-[10px] text-nebula-gray font-bold uppercase">Group Size:</label>
+                  <input
+                    type="number"
+                    min="2"
+                    max="16"
+                    value={groupSize}
+                    onChange={(e) => setGroupSize(parseInt(e.target.value) || 4)}
+                    className="w-12 bg-surface border border-white/10 rounded text-xs px-1.5 py-1 outline-none focus:border-accent-cyan text-center text-foreground"
+                  />
+                  <button
+                    onClick={handleAssignGroups}
+                    disabled={assignGroupsLoading || acceptedTeams.length < groupSize}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-accent-cyan/10 hover:bg-accent-cyan/20 text-accent-cyan border border-accent-cyan/20 hover:border-accent-cyan/50 rounded-xl text-xs font-bold transition-all disabled:opacity-50"
+                  >
+                    {assignGroupsLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Shuffle className="w-3.5 h-3.5" />}
+                    Randomize
+                  </button>
+                </div>
+                {assignGroupsError && <p className="text-error text-[10px] max-w-[150px] truncate" title={assignGroupsError}>{assignGroupsError}</p>}
+                {acceptedTeams.length > 0 && acceptedTeams.some(t => !t.group_name) && (
+                   <p className="text-[9px] text-amber-500 font-mono uppercase tracking-wider">Groups Unassigned</p>
+                )}
+              </div>
             )}
 
             {/* Generate Fixtures — shown only in draft/pre-active state */}
@@ -703,6 +754,11 @@ export const Registration: React.FC<RegistrationProps> = ({
                             </div>
                           </div>
                           <div className="flex items-center gap-2">
+                            {t.group_name && (
+                              <span className="px-2 py-0.5 bg-accent-cyan/10 border border-accent-cyan/20 text-accent-cyan text-[9px] font-bold uppercase tracking-wider rounded font-mono">
+                                {t.group_name}
+                              </span>
+                            )}
                             <div className="w-5 h-5 rounded-full border border-white/10" style={{ backgroundColor: t.color_hex }} />
                             {isAdmin && (
                               <button
@@ -894,6 +950,15 @@ export const Registration: React.FC<RegistrationProps> = ({
                     placeholder="Enter your full name"
                     className="w-full bg-background border border-white/5 focus:border-accent-cyan/40 focus:ring-1 focus:ring-accent-cyan/40 rounded-xl px-4 py-3 text-sm outline-none transition-all"
                   />
+                </div>
+
+                <div>
+                  <label className="block text-[10px] uppercase tracking-wider text-nebula-gray mb-1.5 font-bold">Your Role</label>
+                  <select value={playerRole} onChange={e => setPlayerRole(e.target.value)}
+                    className="w-full bg-background border border-white/5 focus:border-accent-cyan/40 focus:ring-1 focus:ring-accent-cyan/40 rounded-xl px-4 py-3 text-sm outline-none transition-all"
+                  >
+                    {ROLES.map(r => <option key={r} value={r}>{r}</option>)}
+                  </select>
                 </div>
 
                 <div>

@@ -3,8 +3,9 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { db, Match, Team, Tournament } from '../utils/db';
 import { Avatar } from './Avatar';
-import { Calendar, Filter, Play, CheckCircle, Clock, ShieldAlert, X, Save } from 'lucide-react';
-import { checkAndGenerateNextKnockoutRound } from '../utils/formatEngine';
+import { Calendar, Filter, Play, CheckCircle, Clock, ShieldAlert, X, Save, Trophy, Layers } from 'lucide-react';
+import { checkAndGenerateNextKnockoutRound, generateFIFAKnockoutBracketFixtures } from '../utils/formatEngine';
+import { KnockoutBracket } from './KnockoutBracket';
 
 interface FixturesProps {
   tournament: Tournament;
@@ -37,6 +38,20 @@ export const Fixtures: React.FC<FixturesProps> = ({
   const [rounds, setRounds] = useState<string[]>([]);
   const [selectedRound, setSelectedRound] = useState<string>('all');
   const [loading, setLoading] = useState(true);
+  const [viewMode, setViewMode] = useState<'list' | 'bracket'>('list');
+
+  // Self-healing teams: use the prop when populated, otherwise fetch directly.
+  const [localTeams, setLocalTeams] = useState<import('../utils/db').Team[]>(teams);
+
+  useEffect(() => {
+    if (teams.length > 0) {
+      setLocalTeams(teams);
+    } else {
+      db.getTeams(tournament.id, 'accepted').then(fetched => {
+        if (fetched.length > 0) setLocalTeams(fetched);
+      }).catch(() => {/* silently ignore */});
+    }
+  }, [teams, tournament.id]);
 
   // Quick Score modal state
   const [quickScore, setQuickScore] = useState<QuickScoreState | null>(null);
@@ -70,13 +85,62 @@ export const Fixtures: React.FC<FixturesProps> = ({
     fetchMatches();
   }, [fetchMatches]);
 
-  const getTeam = (teamId: string): Team | undefined =>
-    teams.find((t) => t.id === teamId);
+  const getTeam = (teamId: string) =>
+    localTeams.find((t) => t.id === teamId);
 
   const filteredMatches =
     selectedRound === 'all'
       ? matches
       : matches.filter((m) => m.round_name === selectedRound);
+
+  const hasKnockoutMatches = matches.some(m =>
+    ['Quarterfinals', 'Semifinals', 'Finals', 'Grand Final', 'Round of 16'].includes(m.round_name)
+  );
+
+  const handleGenerateFIFAKnockoutBracket = async () => {
+    try {
+      const standings = await db.getStandings(tournament.id);
+      if (standings.length === 0) {
+        alert('Standings are not available yet. Complete group stage matches first.');
+        return;
+      }
+
+      const groups: Record<string, import('../utils/db').StandingsRow[]> = {};
+      standings.forEach(s => {
+        const g = s.group_name || 'Group A';
+        if (!groups[g]) groups[g] = [];
+        groups[g].push(s);
+      });
+
+      const requiredGroups = ['Group A', 'Group B', 'Group C', 'Group D'];
+      const groupWinners: Record<string, { winner: Team; runnerUp: Team }> = {};
+
+      for (const gName of requiredGroups) {
+        const groupRows = groups[gName];
+        if (!groupRows || groupRows.length < 2) {
+          alert(`Missing completed teams for ${gName}. 16 teams (4 per group) required.`);
+          return;
+        }
+        const winnerTeam = getTeam(groupRows[0].team_id);
+        const runnerUpTeam = getTeam(groupRows[1].team_id);
+        if (!winnerTeam || !runnerUpTeam) {
+          alert(`Teams not found for ${gName}.`);
+          return;
+        }
+        groupWinners[gName] = { winner: winnerTeam, runnerUp: runnerUpTeam };
+      }
+
+      const knockoutMatches = generateFIFAKnockoutBracketFixtures(tournament.id, groupWinners);
+      await db.createMatches(knockoutMatches);
+      await fetchMatches();
+      setViewMode('bracket');
+      onRefresh?.();
+      alert('FIFA Knockout Bracket successfully generated!');
+    } catch (err: any) {
+      console.error(err);
+      alert(err.message || 'Failed to generate FIFA Knockout Bracket.');
+    }
+  };
 
   // ── Admin: open Quick Score modal ──────────────────────────────────────────
   const openQuickScore = (e: React.MouseEvent, m: Match) => {
@@ -202,31 +266,86 @@ export const Fixtures: React.FC<FixturesProps> = ({
             </p>
           </div>
 
-          {rounds.length > 0 && (
-            <div className="flex items-center gap-2 bg-surface p-1 rounded-xl border border-white/5">
-              <span className="text-[10px] text-nebula-gray font-bold uppercase tracking-wider pl-3 pr-1 flex items-center gap-1.5">
-                <Filter className="w-3 h-3 text-accent-gold" /> Filter Round:
-              </span>
-              <select
-                value={selectedRound}
-                onChange={(e) => setSelectedRound(e.target.value)}
-                className="bg-background border-none focus:ring-0 text-xs text-foreground font-semibold rounded-lg px-3 py-1.5 outline-none"
-              >
-                <option value="all">All Rounds</option>
-                {rounds.map((r) => (
-                  <option key={r} value={r}>
-                    {r}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
+          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
+            {/* View Mode Toggle Button */}
+            {(hasKnockoutMatches || tournament.format === 'round_16' || tournament.format === 'knockout') && (
+              <div className="flex items-center bg-surface p-1 rounded-xl border border-white/5">
+                <button
+                  onClick={() => setViewMode('list')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                    viewMode === 'list'
+                      ? 'bg-accent-gold text-slate-950 shadow-md'
+                      : 'text-nebula-gray hover:text-white'
+                  }`}
+                >
+                  <Layers className="w-3.5 h-3.5 inline mr-1" /> Matches
+                </button>
+                <button
+                  onClick={() => setViewMode('bracket')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                    viewMode === 'bracket'
+                      ? 'bg-accent-gold text-slate-950 shadow-md'
+                      : 'text-nebula-gray hover:text-white'
+                  }`}
+                >
+                  <Trophy className="w-3.5 h-3.5 inline mr-1" /> FIFA Bracket
+                </button>
+              </div>
+            )}
+
+            {rounds.length > 0 && viewMode === 'list' && (
+              <div className="flex items-center gap-2 bg-surface p-1 rounded-xl border border-white/5">
+                <span className="text-[10px] text-nebula-gray font-bold uppercase tracking-wider pl-3 pr-1 flex items-center gap-1.5">
+                  <Filter className="w-3 h-3 text-accent-gold" /> Filter Round:
+                </span>
+                <select
+                  value={selectedRound}
+                  onChange={(e) => setSelectedRound(e.target.value)}
+                  className="bg-background border-none focus:ring-0 text-xs text-foreground font-semibold rounded-lg px-3 py-1.5 outline-none"
+                >
+                  <option value="all">All Rounds</option>
+                  {rounds.map((r) => (
+                    <option key={r} value={r}>
+                      {r}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+          </div>
         </div>
+
+        {/* Round of 16 FIFA Knockout Generator Banner */}
+        {isAdmin && (tournament.format === 'round_16' || tournament.format === 'hybrid') && (
+          <div className="bg-surface/60 border border-emerald-500/30 rounded-2xl p-5 flex flex-col sm:flex-row justify-between items-center gap-4 shadow-[0_0_20px_rgba(16,185,129,0.08)]">
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                <h4 className="text-sm font-bold text-emerald-400">eFootball Knockout Stage (Quarterfinals)</h4>
+              </div>
+              <p className="text-xs text-nebula-gray mt-1">
+                Top 2 teams from Group A, B, C, D seed into Quarter-Finals: 1A vs 2B, 1C vs 2D, 1B vs 2A, 1D vs 2C.
+              </p>
+            </div>
+            <button
+              className="px-5 py-2.5 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 text-xs font-extrabold rounded-xl transition-all shadow-[0_0_15px_rgba(16,185,129,0.3)] whitespace-nowrap flex items-center gap-2"
+              onClick={handleGenerateFIFAKnockoutBracket}
+            >
+              <Trophy className="w-4 h-4" /> Generate FIFA Knockout Bracket
+            </button>
+          </div>
+        )}
 
         {loading ? (
           <div className="h-64 flex items-center justify-center text-sm text-nebula-gray font-mono">
             [LOADING SCHEDULE...]
           </div>
+        ) : viewMode === 'bracket' ? (
+          <KnockoutBracket
+            matches={matches}
+            teams={localTeams}
+            onSelectMatch={(mId) => onSelectMatch(mId)}
+          />
         ) : matches.length === 0 ? (
           <div className="border border-white/5 rounded-3xl p-12 text-center bg-surface/10 text-nebula-gray">
             No matches scheduled. Start the tournament in the Registry tab.

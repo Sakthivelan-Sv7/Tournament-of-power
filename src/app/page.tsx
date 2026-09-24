@@ -10,7 +10,7 @@ import { Fixtures } from '../components/Fixtures';
 import { PointsTable } from '../components/PointsTable';
 import { MatchCenter } from '../components/MatchCenter';
 import { AdminManagement } from '../components/AdminManagement';
-import { generateRoundRobinFixtures, generateKnockoutRound1 } from '../utils/formatEngine';
+import { generateRoundRobinFixtures, generateKnockoutRound1, generateRoundOf16GroupFixtures, assignTeamsToGroups } from '../utils/formatEngine';
 import {
   Trophy, Calendar, Users, ShieldAlert, Award, RefreshCw,
   Zap, Shield, Plus, ChevronDown, Sparkles, Clock
@@ -84,7 +84,12 @@ export default function HomePage() {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
       if (session) {
-        db.getProfile(session.user.id).then(p => setProfile(p));
+        db.getProfile(session.user.id)
+          .then(p => setProfile(p))
+          .catch(err => {
+            console.warn('Could not load profile on init:', err?.message);
+            setLoading(false);
+          });
       } else {
         setLoading(false);
       }
@@ -95,7 +100,11 @@ export default function HomePage() {
     } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
       if (session) {
-        db.getProfile(session.user.id).then(p => setProfile(p));
+        db.getProfile(session.user.id)
+          .then(p => setProfile(p))
+          .catch(err => {
+            console.warn('Could not load profile on auth change:', err?.message);
+          });
       } else {
         setProfile(null);
         setLoading(false);
@@ -164,6 +173,58 @@ export default function HomePage() {
         else if (teamCount > 4) size = 8;
         else if (teamCount > 2) size = 4;
         generatedMatches = generateKnockoutRound1(activeTournament.id, teams, size);
+      } else if (activeTournament.format === 'round_16') {
+        // Auto-assign teams to 4 groups (Group A, B, C, D) if any are unassigned — random shuffle
+        let currentTeams = [...teams];
+        const unassigned = currentTeams.filter(t => !t.group_name);
+
+        if (unassigned.length > 0) {
+          const assignments = assignTeamsToGroups(unassigned, 4);
+          const assignmentMap: Record<string, string> = {};
+          assignments.forEach(a => { assignmentMap[a.teamId] = a.groupName; });
+
+          const groupUpdates: { teamId: string; groupName: string }[] = [];
+          currentTeams = currentTeams.map(t => {
+            if (!t.group_name && assignmentMap[t.id]) {
+              groupUpdates.push({ teamId: t.id, groupName: assignmentMap[t.id] });
+              return { ...t, group_name: assignmentMap[t.id] };
+            }
+            return t;
+          });
+
+          if (groupUpdates.length > 0) {
+            await db.updateTeamGroups(groupUpdates);
+            setTeams(currentTeams);
+          }
+        }
+
+        generatedMatches = generateRoundOf16GroupFixtures(activeTournament.id, currentTeams);
+      } else if (activeTournament.format === 'hybrid') {
+        if (teams.some(t => !t.group_name)) {
+          alert('Cannot start hybrid tournament: not all teams are assigned to a group.');
+          return;
+        }
+
+        const groups: Record<string, Team[]> = {};
+        teams.forEach(t => {
+          const g = t.group_name!;
+          if (!groups[g]) groups[g] = [];
+          groups[g].push(t);
+        });
+
+        Object.keys(groups).forEach(groupName => {
+          const groupTeams = groups[groupName];
+          const groupMatches = generateRoundRobinFixtures(activeTournament.id, groupTeams, false);
+          const mapped = groupMatches.map(m => ({
+            ...m,
+            round_name: `${groupName} - ${m.round_name}`,
+            metadata_jsonb: {
+              ...(m.metadata_jsonb || {}),
+              group_name: groupName
+            }
+          }));
+          generatedMatches.push(...mapped);
+        });
       }
 
       if (generatedMatches.length > 0) {

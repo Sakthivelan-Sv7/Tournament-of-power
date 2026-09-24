@@ -40,6 +40,7 @@ export interface Team {
   color_hex: string;
   captain_id?: string;
   nation?: string; // ISO 3166-1 alpha-2 country code e.g. 'BR', 'DE'
+  group_name?: string;
   status?: 'pending' | 'accepted' | 'rejected';
 }
 
@@ -112,6 +113,7 @@ export interface StandingsRow {
   logo_url?: string;
   color_hex: string;
   nation?: string;
+  group_name?: string;
   mp: number;
   w: number;
   d: number;
@@ -263,9 +265,13 @@ export const db = {
     };
 
     if (isSupabaseConfigured()) {
-      const { data, error } = await supabase.from('teams').insert([newTeam]).select().single();
-      if (error) throw new Error(error.message);
-      return data as Team;
+      try {
+        const { data, error } = await supabase.from('teams').insert([newTeam]).select().single();
+        if (!error && data) return data as Team;
+        if (error) console.error('Supabase registerTeam error:', error.message || error.code || JSON.stringify(error));
+      } catch (err: any) {
+        console.error('Supabase registerTeam exception:', err?.message || err);
+      }
     }
 
     // Offline-only fallback
@@ -277,14 +283,30 @@ export const db = {
 
   async getTeams(tournamentId: string, status?: 'pending' | 'accepted' | 'rejected'): Promise<Team[]> {
     if (isSupabaseConfigured()) {
-      // Explicitly select known team columns to ensure 'status' is returned and to avoid surprises
-      let query = supabase.from('teams').select('id, tournament_id, name, logo_url, color_hex, captain_id, nation, status, created_at').eq('tournament_id', tournamentId);
-      if (status) query = query.eq('status', status);
-      const { data, error } = await query;
-      if (error) {
-        console.error('Supabase getTeams error:', error);
+      try {
+        let query = supabase.from('teams').select('*').eq('tournament_id', tournamentId);
+        if (status) {
+          query = query.eq('status', status);
+        }
+        let { data, error } = await query;
+
+        // If filtering by status column in DB failed (e.g. status column not yet created in remote DB), retry without status filter & filter in JS
+        if (error && status) {
+          const fallback = await supabase.from('teams').select('*').eq('tournament_id', tournamentId);
+          if (fallback.data) {
+            data = fallback.data.filter((t: any) => !t.status || t.status === status);
+            error = null;
+          }
+        }
+
+        if (error) {
+          console.error('Supabase getTeams error:', error.message || error.code || JSON.stringify(error));
+        } else if (data) {
+          return data as Team[];
+        }
+      } catch (err: any) {
+        console.error('Supabase getTeams exception:', err?.message || err);
       }
-      if (!error && data) return data as Team[];
     }
     const teams = getLocal<Team[]>('top_teams', []);
     return teams.filter(t => t.tournament_id === tournamentId && (!status || t.status === status));
@@ -292,9 +314,13 @@ export const db = {
 
   async updateTeamStatus(teamId: string, status: 'pending' | 'accepted' | 'rejected'): Promise<void> {
     if (isSupabaseConfigured()) {
-      const { error } = await supabase.from('teams').update({ status }).eq('id', teamId);
-      if (error) throw new Error(error.message);
-      return;
+      try {
+        const { error } = await supabase.from('teams').update({ status }).eq('id', teamId);
+        if (error) console.error('Supabase updateTeamStatus error:', error.message || error.code || JSON.stringify(error));
+        else return;
+      } catch (err: any) {
+        console.error('Supabase updateTeamStatus exception:', err?.message || err);
+      }
     }
     const teams = getLocal<Team[]>('top_teams', []);
     const idx = teams.findIndex(t => t.id === teamId);
@@ -306,12 +332,40 @@ export const db = {
 
   async updateTeamCaptain(teamId: string, captainId: string): Promise<void> {
     if (isSupabaseConfigured()) {
-      await supabase.from('teams').update({ captain_id: captainId }).eq('id', teamId);
+      try {
+        await supabase.from('teams').update({ captain_id: captainId }).eq('id', teamId);
+      } catch (err: any) {
+        console.error('Supabase updateTeamCaptain exception:', err?.message || err);
+      }
     }
     const teams = getLocal<Team[]>('top_teams', []);
     const idx = teams.findIndex(t => t.id === teamId);
     if (idx !== -1) {
       teams[idx].captain_id = captainId;
+      setLocal('top_teams', teams);
+    }
+  },
+
+  async updateTeamGroups(updates: { teamId: string, groupName: string }[]): Promise<void> {
+    if (isSupabaseConfigured()) {
+      try {
+        await Promise.all(
+          updates.map(u => supabase.from('teams').update({ group_name: u.groupName }).eq('id', u.teamId))
+        );
+      } catch (err: any) {
+        console.error('Supabase updateTeamGroups exception:', err?.message || err);
+      }
+    }
+    const teams = getLocal<Team[]>('top_teams', []);
+    let modified = false;
+    updates.forEach(u => {
+      const idx = teams.findIndex(t => t.id === u.teamId);
+      if (idx !== -1) {
+        teams[idx].group_name = u.groupName;
+        modified = true;
+      }
+    });
+    if (modified) {
       setLocal('top_teams', teams);
     }
   },
@@ -540,7 +594,18 @@ export const db = {
     const { data, error } = await supabase.from('profiles').select('*').eq('id', userId).single();
     if (error) {
       if (error.code === 'PGRST116') return null; // No rows found
-      throw new Error(error.message);
+      // Gracefully handle JWT clock-skew and other auth errors — don't crash the app
+      const msg = error.message || '';
+      if (
+        msg.includes('JWT') ||
+        msg.includes('invalid_jwt') ||
+        error.code === 'PGRST301' ||
+        (error as any).status === 401
+      ) {
+        console.warn('Auth/JWT error loading profile:', msg);
+        return null;
+      }
+      throw new Error(msg);
     }
     return data;
   },
@@ -624,6 +689,7 @@ export const db = {
         logo_url: team.logo_url,
         color_hex: team.color_hex,
         nation: team.nation,
+        group_name: team.group_name,
         mp: 0, w: 0, d: 0, l: 0, gf: 0, ga: 0, gd: 0, pts: 0
       };
     });
@@ -650,7 +716,7 @@ export const db = {
       const shootoutWinner: string | undefined = (m as any).metadata_jsonb?.shootout?.winner;
 
       if (shootoutWinner) {
-        // Shootout decided — winner gets 3 pts, loser gets 0 pts; no draw recorded.
+        // Shootout decided — winner gets 2 pts, loser gets 1 pt
         if (shootoutWinner === m.team_a_id) {
           teamA.w++;
           teamA.pts += 2;
@@ -662,11 +728,11 @@ export const db = {
         }
       } else if (m.team_a_score > m.team_b_score) {
         teamA.w++;
-        teamA.pts += 2;
+        teamA.pts += 3;
         teamB.l++;
       } else if (m.team_a_score < m.team_b_score) {
         teamB.w++;
-        teamB.pts += 2;
+        teamB.pts += 3;
         teamA.l++;
       } else {
         // Genuine draw — no shootout recorded.
@@ -683,14 +749,29 @@ export const db = {
       gd: s.gf - s.ga
     }));
 
-    rows.sort((a, b) => {
-      if (b.pts !== a.pts) return b.pts - a.pts;
-      if (b.gd !== a.gd) return b.gd - a.gd;
-      if (b.gf !== a.gf) return b.gf - a.gf;
-      return a.team_name.localeCompare(b.team_name);
+    // Rank per group
+    const groupedRows: Record<string, StandingsRow[]> = {};
+    rows.forEach(r => {
+      const g = (r as any).group_name || '';
+      if (!groupedRows[g]) groupedRows[g] = [];
+      groupedRows[g].push(r as StandingsRow);
     });
 
-    return rows.map((r, idx) => ({ ...r, rank: idx + 1 }));
+    const finalRows: StandingsRow[] = [];
+    Object.values(groupedRows).forEach(groupArr => {
+      groupArr.sort((a, b) => {
+        if (b.pts !== a.pts) return b.pts - a.pts;
+        if (b.gd !== a.gd) return b.gd - a.gd;
+        if (b.gf !== a.gf) return b.gf - a.gf;
+        return a.team_name.localeCompare(b.team_name);
+      });
+      groupArr.forEach((r, idx) => {
+        r.rank = idx + 1;
+        finalRows.push(r);
+      });
+    });
+
+    return finalRows;
   },
 
   // File Upload Helper (Storage)

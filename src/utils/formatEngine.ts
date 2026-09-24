@@ -80,6 +80,45 @@ export function generateRoundRobinFixtures(
 }
 
 /**
+ * Randomly assign teams to groups using Fisher-Yates shuffle.
+ * @param teams List of accepted teams
+ * @param groupSize Number of teams per group (default 4)
+ * @returns Array of objects containing teamId and assigned groupName
+ */
+/**
+ * Randomly assign teams to groups using Fisher-Yates shuffle.
+ * Distributes accepted teams evenly across target number of groups (default 4: Group A, B, C, D)
+ * @param teams List of accepted teams
+ * @param groupSize Preferred group size or number of groups
+ * @returns Array of objects containing teamId and assigned groupName
+ */
+export function assignTeamsToGroups(
+  teams: Team[],
+  groupSize: number = 4
+): { teamId: string; groupName: string }[] {
+  if (teams.length === 0) return [];
+
+  // Fisher-Yates shuffle
+  const shuffled = [...teams];
+  for (let i = shuffled.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+  }
+
+  const numGroups = 4; // Target 4 groups: Group A, Group B, Group C, Group D
+  const groupNames = Array.from({ length: numGroups }, (_, i) => `Group ${String.fromCharCode(65 + i)}`);
+
+  const assignments: { teamId: string; groupName: string }[] = [];
+
+  shuffled.forEach((team, index) => {
+    const groupName = groupNames[index % numGroups];
+    assignments.push({ teamId: team.id, groupName });
+  });
+
+  return assignments;
+}
+
+/**
  * Generate Knockout Round 1 matches
  * Pairs teams in order of registration or randomized
  */
@@ -214,3 +253,101 @@ export async function checkAndGenerateNextKnockoutRound(
 
   return false;
 }
+
+/**
+ * Generate Round of 16 Group Stage Fixtures (4 Groups: Group A, B, C, D)
+ * ONLY generates fixtures for groups that have assigned teams (minimum 2 teams per group).
+ */
+export function generateRoundOf16GroupFixtures(
+  tournamentId: string,
+  teams: Team[]
+): Omit<Match, 'id' | 'status'>[] {
+  const groupNames = ['Group A', 'Group B', 'Group C', 'Group D'];
+  const groups: Record<string, Team[]> = {
+    'Group A': [],
+    'Group B': [],
+    'Group C': [],
+    'Group D': [],
+  };
+
+  // Group ONLY by explicitly assigned group_name
+  teams.forEach((t) => {
+    if (t.group_name && groups[t.group_name]) {
+      groups[t.group_name].push(t);
+    }
+  });
+
+  const fixtures: Omit<Match, 'id' | 'status'>[] = [];
+
+  groupNames.forEach((groupName) => {
+    const groupTeams = groups[groupName] || [];
+    // Only generate round robin matches if there are at least 2 assigned teams in this group
+    if (groupTeams.length >= 2) {
+      const groupMatches = generateRoundRobinFixtures(tournamentId, groupTeams, false);
+      const mapped = groupMatches.map((m) => ({
+        ...m,
+        round_name: `${groupName} - ${m.round_name}`,
+        metadata_jsonb: {
+          ...(m.metadata_jsonb || {}),
+          group_name: groupName,
+          stage: 'group_stage',
+        },
+      }));
+      fixtures.push(...mapped);
+    }
+  });
+
+  return fixtures;
+}
+
+/**
+ * Generate FIFA Knockout Bracket from Group Stage standings (Top 2 per group)
+ * Match 1: 1A vs 2B
+ * Match 2: 1C vs 2D
+ * Match 3: 1B vs 2A
+ * Match 4: 1D vs 2C
+ */
+export function generateFIFAKnockoutBracketFixtures(
+  tournamentId: string,
+  groupWinners: Record<string, { winner: Team; runnerUp: Team }>
+): Omit<Match, 'id' | 'status'>[] {
+  const gA = groupWinners['Group A'];
+  const gB = groupWinners['Group B'];
+  const gC = groupWinners['Group C'];
+  const gD = groupWinners['Group D'];
+
+  if (!gA || !gB || !gC || !gD) {
+    throw new Error('All 4 Groups (Group A, B, C, D) must have completed standings to generate the FIFA Knockout Bracket.');
+  }
+
+  const pairings = [
+    { teamA: gA.winner, teamB: gB.runnerUp, name: 'QF 1 (1A vs 2B)', matchIndex: 0 },
+    { teamA: gC.winner, teamB: gD.runnerUp, name: 'QF 2 (1C vs 2D)', matchIndex: 1 },
+    { teamA: gB.winner, teamB: gA.runnerUp, name: 'QF 3 (1B vs 2A)', matchIndex: 2 },
+    { teamA: gD.winner, teamB: gC.runnerUp, name: 'QF 4 (1D vs 2C)', matchIndex: 3 },
+  ];
+
+  const fixtures: Omit<Match, 'id' | 'status'>[] = [];
+
+  pairings.forEach((p, i) => {
+    const scheduledTime = new Date();
+    scheduledTime.setHours(18 + i, 0, 0, 0);
+
+    fixtures.push({
+      tournament_id: tournamentId,
+      round_name: 'Quarterfinals',
+      team_a_id: p.teamA.id,
+      team_b_id: p.teamB.id,
+      scheduled_at: scheduledTime.toISOString(),
+      metadata_jsonb: {
+        match_index: p.matchIndex,
+        next_match_index: Math.floor(p.matchIndex / 2),
+        pairing_label: p.name,
+        stage: 'knockout',
+      },
+    });
+  });
+
+  return fixtures;
+}
+

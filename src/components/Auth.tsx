@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { supabase } from '../utils/supabaseClient';
-import { Trophy, Mail, Lock, LogIn, UserPlus } from 'lucide-react';
+import { Trophy, Mail, Lock, LogIn, UserPlus, WifiOff, CheckCircle } from 'lucide-react';
 
 export function Auth({ onAuthSuccess }: { onAuthSuccess: () => void }) {
   const [email, setEmail] = useState('');
@@ -8,29 +8,66 @@ export function Auth({ onAuthSuccess }: { onAuthSuccess: () => void }) {
   const [loading, setLoading] = useState(false);
   const [isLogin, setIsLogin] = useState(true);
   const [errorMsg, setErrorMsg] = useState('');
+  const [successMsg, setSuccessMsg] = useState('');
+  const [supabaseDown, setSupabaseDown] = useState(false);
+
+  // Detect if Supabase is reachable on mount
+  useEffect(() => {
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    if (!url || url === 'your-supabase-project-url') {
+      setSupabaseDown(true);
+      return;
+    }
+    // Quick health check — Supabase always returns something at /rest/v1/
+    fetch(`${url}/rest/v1/`, { method: 'HEAD' })
+      .then(() => setSupabaseDown(false))
+      .catch(() => setSupabaseDown(true));
+  }, []);
+
+  const friendlyError = (err: any): string => {
+    const msg: string = err?.message || '';
+    if (!msg || msg === 'Failed to fetch' || msg.toLowerCase().includes('networkerror') || msg.toLowerCase().includes('fetch')) {
+      return '⚠️ Cannot reach Supabase. Your project may be paused. Go to supabase.com/dashboard and restore it, then try again.';
+    }
+    if (msg.toLowerCase().includes('invalid login credentials') || msg.toLowerCase().includes('invalid email or password')) {
+      return 'Incorrect email or password. Please try again.';
+    }
+    if (msg.toLowerCase().includes('email not confirmed')) {
+      return 'Please confirm your email address before signing in.';
+    }
+    if (msg.toLowerCase().includes('user already registered')) {
+      return 'An account with this email already exists. Try signing in instead.';
+    }
+    if (msg.toLowerCase().includes('password should be at least')) {
+      return 'Password must be at least 6 characters.';
+    }
+    return msg || 'An error occurred during authentication.';
+  };
 
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setErrorMsg('');
+    setSuccessMsg('');
 
     try {
       if (isLogin) {
-        const { error } = await supabase.auth.signInWithPassword({
-          email,
-          password,
-        });
+        const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
+        onAuthSuccess();
       } else {
-        const { error } = await supabase.auth.signUp({
-          email,
-          password,
-        });
+        const { data, error } = await supabase.auth.signUp({ email, password });
         if (error) throw error;
+        // If email confirmation is required, data.session will be null
+        if (!data.session) {
+          setSuccessMsg('Account created! Check your email to confirm your address, then sign in.');
+          setIsLogin(true);
+        } else {
+          onAuthSuccess();
+        }
       }
-      onAuthSuccess();
     } catch (err: any) {
-      setErrorMsg(err.message || 'An error occurred during authentication');
+      setErrorMsg(friendlyError(err));
     } finally {
       setLoading(false);
     }
@@ -52,6 +89,31 @@ export function Auth({ onAuthSuccess }: { onAuthSuccess: () => void }) {
             {isLogin ? 'Sign in to access the tournament.' : 'Sign up to join the competition.'}
           </p>
         </div>
+
+        {supabaseDown && (
+          <div className="p-4 rounded-xl bg-orange-500/10 border border-orange-500/30 text-orange-300 text-sm flex items-start gap-3">
+            <WifiOff className="w-5 h-5 shrink-0 mt-0.5 text-orange-400" />
+            <div>
+              <p className="font-bold text-orange-400 mb-1">Supabase Project Unreachable</p>
+              <p>Your project is likely <strong>paused</strong> (free-tier projects auto-pause after 1 week of inactivity).</p>
+              <a
+                href="https://supabase.com/dashboard"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mt-2 inline-block underline text-amber-400 hover:text-amber-300 font-semibold"
+              >
+                → Open Supabase Dashboard to restore it
+              </a>
+            </div>
+          </div>
+        )}
+
+        {successMsg && (
+          <div className="p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-sm flex items-center gap-3">
+            <CheckCircle className="w-5 h-5 shrink-0 text-emerald-400" />
+            {successMsg}
+          </div>
+        )}
 
         {errorMsg && (
           <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-sm">

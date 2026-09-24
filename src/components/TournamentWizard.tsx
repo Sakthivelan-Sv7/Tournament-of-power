@@ -302,6 +302,51 @@ export const TournamentWizard: React.FC<TournamentWizardProps> = ({ onComplete, 
                   </div>
                 </div>
               </div>
+
+              <div 
+                onClick={() => setFormat('round_16')}
+                className={`p-5 rounded-2xl border cursor-pointer transition-all ${
+                  format === 'round_16'
+                    ? 'bg-accent-gold/5 border-accent-gold shadow-[0_0_15px_rgba(16,185,129,0.15)]'
+                    : 'bg-background border-white/5 hover:border-white/10'
+                }`}
+              >
+                <div className="flex items-center gap-4">
+                  <div className="w-10 h-10 rounded-xl bg-surface flex items-center justify-center text-emerald-400 border border-white/5">
+                    <Award className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h3 className="font-display text-sm font-semibold text-foreground">Round of 16 (Group Stage + FIFA Knockout)</h3>
+                      <span className="text-[9px] font-extrabold font-mono px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                        OFFICIAL FIFA
+                      </span>
+                    </div>
+                    <p className="text-xs text-nebula-gray mt-0.5">
+                      16 teams in 4 Groups (Group A, B, C, D). Top 2 per group advance to the 8-team single-elimination FIFA knockout bracket.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div 
+                onClick={() => setFormat('hybrid')}
+                className={`p-5 rounded-2xl border cursor-pointer transition-all ${
+                  format === 'hybrid'
+                    ? 'bg-accent-gold/5 border-accent-gold'
+                    : 'bg-background border-white/5 hover:border-white/10'
+                }`}
+              >
+                <div className="flex items-center gap-4">
+                  <div className="w-10 h-10 rounded-xl bg-surface flex items-center justify-center text-purple-400 border border-white/5">
+                    <Layers className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="font-display text-sm font-semibold text-foreground">Hybrid (Groups + Knockout)</h3>
+                    <p className="text-xs text-nebula-gray mt-0.5">Teams are assigned to groups for round-robin play, followed by a knockout bracket.</p>
+                  </div>
+                </div>
+              </div>
             </div>
           )}
 
